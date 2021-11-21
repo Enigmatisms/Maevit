@@ -29,11 +29,6 @@ def makeMLP(in_chan):
 class TransformerEncoder(nn.Module):
     def __init__(self, dim_k, dim_v, mlp_chan, head_num = 2):
         super().__init__()
-        # 我感觉自己又不是特别能记得Transformer的工作原理了
-        # 原理上来说，有多少个Head就要进行多少次投影（Q,K,V都是）
-        # 每个输入的X都是（batch，seq，embedding_dim），也就是说，一个patch只有一个一维的高维特征
-        # 多头注意力需要将其变为(batch, seq, emd / head) 这样的形式
-        # 注意Q, K 与 V不一定是同一维度，V是输出，Q,K均是与输入有关的
         assert(dim_k % head_num == 0)
         assert(dim_v % head_num == 0)
         self.dim_k = dim_k
