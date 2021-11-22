@@ -2,6 +2,7 @@
 """
     Sequential Pooling in CVT & CCT
     SeqPool is actually like some kind of "Attentional Pooling"
+    @author Enigmatisms
 """
 
 import torch

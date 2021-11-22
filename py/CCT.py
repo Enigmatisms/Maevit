@@ -2,11 +2,11 @@
 """
     Compact Convolution Transformer
     CCT 7/3X1
+    @author Enigmatisms
 """
 
 import torch
 from torch import nn
-from torch.nn import functional as F
 from TEncoder import TransformerEncoder
 from SeqPool import SeqPool
 
@@ -22,6 +22,15 @@ class CCT(nn.Module):
             nn.ReLU(True),
             nn.MaxPool2d(2)
         )
+        
+    def loadFromFile(self, load_path:str):
+        save = torch.load(load_path)   
+        save_model = save['model']                  
+        model_dict = self.state_dict()
+        state_dict = {k:v for k, v in save_model.items()}
+        model_dict.update(state_dict)
+        self.load_state_dict(model_dict) 
+        print("CCT Model loaded from '%s'"%(load_path))
     
     def __init__(self, trans_num = 7, ksize = 3, emb_dim = 256, conv_num = 1):
         super().__init__()
@@ -51,8 +60,7 @@ class CCT(nn.Module):
         batch_size, emb_dim, _, _ = X.shape
         X = X.view(batch_size, emb_dim, -1)
         X = torch.transpose(X, -1, -2)      # (n, seq_length=w0 * h0, emb_dim)
-        for i in range(self.trans_num):
-            X = self.transformers[i](X)
+        X = self.transformers(X)
         z = self.sp(X)
         return self.classify(z)
         

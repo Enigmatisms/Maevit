@@ -5,6 +5,7 @@
     I want to shrink the network down and implement a light-weight [Lite] version
     There is actually ViT-Lite:
     Escaping the Big Data Paradigm with Compact Transformers
+    @author Enigmatisms
 """
 
 import torch
@@ -54,7 +55,7 @@ class TransformerEncoder(nn.Module):
             result.append(proba @ self.proj_v[i](X))
         return torch.cat(result, dim = -1)
     
-    def forward(self, X, norm = False):
+    def forward(self, X):
         tmp = self.pre_ln(X)
         tmp = self.attention(tmp)
         X = X + tmp
