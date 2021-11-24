@@ -75,19 +75,19 @@ if __name__ == "__main__":
 
             ## +++++++ Load from Dataset iterates +++++++ 
             ## +++++++++++++++ Training +++++++++++++++++
-            
-            with torch.no_grad():
-                # model.eval()
-                ## +++++++++++ Load from Test set ++++++++=
+            if train_cnt % eval_time == 0:
+                with torch.no_grad():
+                    # model.eval()
+                    ## +++++++++++ Load from Test set ++++++++=
 
-                # print("Epoch: %3d / %3d\t Batch %4d / %4d\t train loss: %.4f\t test loss: %.4f\t acc: %.4f\t test acc: %.4f\t lr: %f"%(
-                #         ep, epochs, i, batch_num, loss.item(), test_loss.item(), train_acc, test_acc, opt_sch.param_groups[0]['lr']
-                # ))
-                # writer.add_scalar('Loss/Train Loss', loss, train_cnt)
-                # writer.add_scalar('Loss/Test loss', test_loss, train_cnt)
-                # writer.add_scalar('Acc/Train Set Accuracy', train_acc, train_cnt)
-                # writer.add_scalar('Acc/Test Set Accuracy', test_acc, train_cnt)
-                pass
+                    # print("Epoch: %3d / %3d\t Batch %4d / %4d\t train loss: %.4f\t test loss: %.4f\t acc: %.4f\t test acc: %.4f\t lr: %f"%(
+                    #         ep, epochs, i, batch_num, loss.item(), test_loss.item(), train_acc, test_acc, opt_sch.param_groups[0]['lr']
+                    # ))
+                    # writer.add_scalar('Loss/Train Loss', loss, train_cnt)
+                    # writer.add_scalar('Loss/Test loss', test_loss, train_cnt)
+                    # writer.add_scalar('Acc/Train Set Accuracy', train_acc, train_cnt)
+                    # writer.add_scalar('Acc/Test Set Accuracy', test_acc, train_cnt)
+                    pass
             if train_cnt % chkpt_ntv == 0:
                 # torch.save({
                 #     'model': model.state_dict(),
