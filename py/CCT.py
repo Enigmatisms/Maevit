@@ -7,8 +7,8 @@
 
 import torch
 from torch import nn
-from TEncoder import TransformerEncoder
-from SeqPool import SeqPool
+from py.TEncoder import TransformerEncoder
+from py.SeqPool import SeqPool
 
 """
     - trans_num: number of transformer encoder
@@ -62,5 +62,5 @@ class CCT(nn.Module):
         X = torch.transpose(X, -1, -2)      # (n, seq_length=w0 * h0, emb_dim)
         X = self.transformers(X)
         z = self.sp(X)
-        return self.classify(z)
+        return self.classify(z).squeeze(dim = 1)
         

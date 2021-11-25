@@ -14,7 +14,7 @@ class SeqPool(nn.Module):
         super().__init__()
         self.linear = nn.Linear(in_chan, 1)
         
-    def foward(self, X:torch.Tensor):
+    def forward(self, X:torch.Tensor):
         proba_x = F.softmax(torch.transpose(self.linear(X), -1, -2), dim = -1)
         return proba_x @ X
     

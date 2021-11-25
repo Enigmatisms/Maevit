@@ -4,19 +4,14 @@
 """
 import os
 import torch
-import shutil
 import argparse
-from datetime import datetime
 from torch.autograd import Variable as Var
-from torchvision.utils import save_image
-from torchvision.datasets import CIFAR10
 
 from py.CCT import CCT
 
 from torch import optim
 from torch import nn
 from torchvision import transforms
-from torch.utils.data.dataloader import DataLoader
 
 from py.train_utils import *
 
@@ -26,15 +21,16 @@ default_model_path = "./model/"
 
 # Calculate accurarcy (correct prediction counter)
 def accCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
-    pass
+    _, max_pos = torch.max(pred, dim = 1)
+    return torch.sum(max_pos == truth)
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type = int, default = 40, help = "Training lasts for . epochs")
-    parser.add_argument("--batch_size", type = int, default = 5, help = "Batch size for range image packs.")
-    parser.add_argument("--eval_time", type = int, default = 20, help = "Eval every <eval_time> batches.")
-    parser.add_argument("--chkpt_ntv", type = int, default = 400, help = "Interval for checkpoints.")
+    parser.add_argument("--epochs", type = int, default = 20, help = "Training lasts for . epochs")
+    parser.add_argument("--batch_size", type = int, default = 50, help = "Batch size for range image packs.")
+    parser.add_argument("--eval_time", type = int, default = 5, help = "Eval every <eval_time> batches.")
+    parser.add_argument("--chkpt_ntv", type = int, default = 20, help = "Interval for checkpoints.")
     parser.add_argument("--name", type = str, default = "model_1.pth", help = "Model name for loading")
     parser.add_argument("-d", "--del_dir", action = "store_true", help = "Delete dir ./logs and start new tensorboard records")
     parser.add_argument("-c", "--cuda", default = False, action = "store_true", help = "Use CUDA to speed up training")
@@ -67,14 +63,14 @@ if __name__ == "__main__":
     test_set = getCIFAR10Dataset(False, to_tensor, batch_size)
     
     model:CCT = CCT()       # default parameters
+    model.to(device)
     if use_load == True and os.path.exists(load_path):
         model.loadFromFile(load_path)
     else:
         print("Not loading or load path '%s' does not exist."%(load_path))
-    
     loss_func = nn.CrossEntropyLoss()
-    opt = optim.AdamW(model.paramters(), lr = 1e-3)
-    opt_sch = optim.lr_scheduler.MultiStepLR([15, 30, 45, 60], gamma = 0.1, last_epoch = -1)
+    opt = optim.AdamW(model.parameters(), lr = 1e-3)
+    opt_sch = optim.lr_scheduler.MultiStepLR(opt, [15, 30, 45, 60], gamma = 0.1, last_epoch = -1)
 
     batch_num = len(train_set) // batch_size
     train_cnt = 0
@@ -82,12 +78,13 @@ if __name__ == "__main__":
         model.train()
         train_acc_cnt = 0
         train_num = 0
-        for i, px, py in enumerate(train_set):
+        for i, (px, py) in enumerate(train_set):
             loss:torch.Tensor = torch.zeros(1).to(device)
             px:torch.Tensor = px.to(device)
             py:torch.Tensor = py.to(device)
             pred = model(px)
-            loss = loss_func(pred, py)
+            one_hot:torch.Tensor = makeOneHot(py, device)
+            loss = loss_func(pred, one_hot)
             train_acc_cnt += accCounter(pred, py)
             train_num += len(pred)
             if train_cnt % eval_time == 1:
@@ -102,11 +99,12 @@ if __name__ == "__main__":
                         pty:torch.Tensor = pty.to(device)
                         pred = model(ptx)
                         test_acc_cnt += accCounter(pred, pty)
-                        test_loss += loss_func(pred, pty)
+                        one_hot_test:torch.Tensor = makeOneHot(pty, device)
+                        test_loss += loss_func(pred, one_hot_test)
                     train_acc = train_acc_cnt / train_num
                     test_acc = test_acc_cnt / test_length
                     print("Epoch: %4d / %4d\t Batch %4d / %4d\t train loss: %.4f\t test loss: %.4f\t acc: %.4f\t test acc: %.4f\t lr: %f"%(
-                            ep, epochs, i, batch_num, loss.item(), test_loss.item(), train_acc, test_acc, opt_sch.param_groups[0]['lr']
+                            ep, epochs, i, batch_num, loss.item(), test_loss.item(), train_acc, test_acc, opt_sch.get_last_lr()[-1]
                     ))
                     train_num = 0
                     writer.add_scalar('Loss/Train Loss', loss, train_cnt)

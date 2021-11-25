@@ -17,7 +17,7 @@ from torch.nn import functional as F
 def makeMLP(in_chan):
     return nn.Sequential(
         nn.Linear(in_chan, 2 * in_chan),
-        nn.LayerNorm(in_chan),
+        nn.LayerNorm(2 * in_chan),
         nn.GELU(),
         nn.Linear(2 * in_chan, in_chan),
         nn.LayerNorm(in_chan),
@@ -43,7 +43,7 @@ class TransformerEncoder(nn.Module):
         self.proj_v = nn.ModuleList([nn.Linear(dim_v, self.dim_h_v) for _ in range(head_num)])
         self.pre_ln = nn.LayerNorm(dim_k)
         self.post_ln = nn.LayerNorm(dim_v)
-        self.mlp = makeMLP(mlp_chan, mlp_chan)
+        self.mlp = makeMLP(mlp_chan)
         
     def attention(self, X:torch.Tensor):
         result = []
