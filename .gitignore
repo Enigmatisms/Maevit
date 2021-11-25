@@ -1,3 +1,4 @@
 dataset/
 check_points/
 model/*
+/**/__pycache__

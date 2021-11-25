@@ -18,7 +18,7 @@ def makeOneHot(labels:torch.Tensor, device)->torch.Tensor:
     return one_hot
 
 def getSummaryWriter(epochs:int, del_dir:bool):
-    logdir = '../logs/'
+    logdir = './logs/'
     if os.path.exists(logdir) and del_dir:
         shutil.rmtree(logdir)
     time_stamp = "{0:%Y-%m-%d/%H-%M-%S}-epoch{1}/".format(datetime.now(), epochs)
