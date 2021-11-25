@@ -5,7 +5,6 @@
 import os
 import torch
 import argparse
-from torch.autograd import Variable as Var
 
 from py.CCT import CCT
 
@@ -28,9 +27,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type = int, default = 20, help = "Training lasts for . epochs")
-    parser.add_argument("--batch_size", type = int, default = 50, help = "Batch size for range image packs.")
+    parser.add_argument("--batch_size", type = int, default = 100, help = "Batch size for range image packs.")
     parser.add_argument("--eval_time", type = int, default = 5, help = "Eval every <eval_time> batches.")
-    parser.add_argument("--chkpt_ntv", type = int, default = 20, help = "Interval for checkpoints.")
+    parser.add_argument("--chkpt_ntv", type = int, default = 50, help = "Interval for checkpoints.")
     parser.add_argument("--name", type = str, default = "model_1.pth", help = "Model name for loading")
     parser.add_argument("-d", "--del_dir", action = "store_true", help = "Delete dir ./logs and start new tensorboard records")
     parser.add_argument("-c", "--cuda", default = False, action = "store_true", help = "Use CUDA to speed up training")
@@ -69,10 +68,11 @@ if __name__ == "__main__":
     else:
         print("Not loading or load path '%s' does not exist."%(load_path))
     loss_func = nn.CrossEntropyLoss()
-    opt = optim.AdamW(model.parameters(), lr = 1e-3)
-    opt_sch = optim.lr_scheduler.MultiStepLR(opt, [15, 30, 45, 60], gamma = 0.1, last_epoch = -1)
+    batch_num = len(train_set)
 
-    batch_num = len(train_set) // batch_size
+    opt = optim.AdamW(model.parameters(), lr = 1e-4)
+    opt_sch = optim.lr_scheduler.MultiStepLR(opt, [3 * batch_num, 6 * batch_num, 9 * batch_num, 14 * batch_num], gamma = 0.1, last_epoch = -1)
+
     train_cnt = 0
     for ep in range(epochs):
         model.train()
@@ -87,11 +87,16 @@ if __name__ == "__main__":
             loss = loss_func(pred, one_hot)
             train_acc_cnt += accCounter(pred, py)
             train_num += len(pred)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            opt_sch.step()
             if train_cnt % eval_time == 1:
                 with torch.no_grad():
                     model.eval()
+                    ## wocao not optimizing at all, fuck
                     ## +++++++++++ Load from Test set ++++++++=
-                    test_length = len(test_set)
+                    test_length = len(test_set) * batch_size
                     test_acc_cnt = 0
                     test_loss = torch.zeros(1).to(device)
                     for ptx, pty in test_set:
@@ -107,6 +112,7 @@ if __name__ == "__main__":
                             ep, epochs, i, batch_num, loss.item(), test_loss.item(), train_acc, test_acc, opt_sch.get_last_lr()[-1]
                     ))
                     train_num = 0
+                    train_acc_cnt = 0
                     writer.add_scalar('Loss/Train Loss', loss, train_cnt)
                     writer.add_scalar('Loss/Test loss', test_loss, train_cnt)
                     writer.add_scalar('Acc/Train Set Accuracy', train_acc, train_cnt)

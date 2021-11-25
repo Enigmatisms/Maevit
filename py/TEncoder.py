@@ -17,11 +17,10 @@ from torch.nn import functional as F
 def makeMLP(in_chan):
     return nn.Sequential(
         nn.Linear(in_chan, 2 * in_chan),
-        nn.LayerNorm(2 * in_chan),
         nn.GELU(),
+        nn.Dropout(0.1),
         nn.Linear(2 * in_chan, in_chan),
-        nn.LayerNorm(in_chan),
-        nn.GELU()
+        nn.Dropout(0.1)
     )
 
 """
@@ -41,6 +40,7 @@ class TransformerEncoder(nn.Module):
         self.proj_q = nn.ModuleList([nn.Linear(dim_k, self.dim_h_k) for _ in range(head_num)])
         self.proj_k = nn.ModuleList([nn.Linear(dim_k, self.dim_h_k) for _ in range(head_num)])
         self.proj_v = nn.ModuleList([nn.Linear(dim_v, self.dim_h_v) for _ in range(head_num)])
+        self.proj_o = nn.Linear(dim_v, dim_k)
         self.pre_ln = nn.LayerNorm(dim_k)
         self.post_ln = nn.LayerNorm(dim_v)
         self.mlp = makeMLP(mlp_chan)
@@ -53,7 +53,7 @@ class TransformerEncoder(nn.Module):
             proba_mat = Xq @ torch.transpose(Xk, -1, -2) / self.normalize_coeff
             proba = F.softmax(proba_mat, dim = -1)
             result.append(proba @ self.proj_v[i](X))
-        return torch.cat(result, dim = -1)
+        return self.proj_o(torch.cat(result, dim = -1))
     
     def forward(self, X):
         tmp = self.pre_ln(X)
