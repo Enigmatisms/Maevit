@@ -1,4 +1,5 @@
 dataset/
 check_points/
 model/*
+logs/*
 /**/__pycache__
