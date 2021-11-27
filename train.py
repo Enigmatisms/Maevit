@@ -82,11 +82,20 @@ if __name__ == "__main__":
         model.loadFromFile(load_path)
     else:
         print("Not loading or load path '%s' does not exist."%(load_path))
+<<<<<<< HEAD
     loss_func = LabelSmoothingCrossEntropy(0.1)
     batch_num = len(train_set)
 
     opt = optim.AdamW(model.parameters(), lr = 5e-4, betas = (0.9, 0.999), weight_decay=args.weight_decay)
     opt_sch = optim.lr_scheduler.MultiStepLR(opt, [10 * batch_num, 20 * batch_num, 30 * batch_num, 40 * batch_num], gamma = 0.1, last_epoch = -1)
+=======
+    loss_func = nn.CrossEntropyLoss()
+    batch_num = len(train_set)
+
+    opt = optim.AdamW(model.parameters(), lr = 1e-4)
+    opt_sch = optim.lr_scheduler.MultiStepLR(opt, [3 * batch_num, 6 * batch_num, 9 * batch_num, 14 * batch_num], gamma = 0.1, last_epoch = -1)
+
+>>>>>>> 8f8d0588e20e9b3d3e3e134c248790019a050532
     train_cnt = 0
     for ep in range(epochs):
         model.train()
