@@ -9,9 +9,9 @@ import argparse
 from py.CCT import CCT
 
 from torch import optim
-from torch import nn
 from torchvision import transforms
 
+from py.LabelSmoothing import LabelSmoothingCrossEntropy
 from py.train_utils import *
 
 load_path = ""
@@ -31,6 +31,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval_time", type = int, default = 5, help = "Eval every <eval_time> batches.")
     parser.add_argument("--chkpt_ntv", type = int, default = 50, help = "Interval for checkpoints.")
     parser.add_argument("--name", type = str, default = "model_1.pth", help = "Model name for loading")
+    parser.add_argument("--weight_decay", type = float, default = 3e-2, help = "Weight Decay in AdamW")
     parser.add_argument("-d", "--del_dir", action = "store_true", help = "Delete dir ./logs and start new tensorboard records")
     parser.add_argument("-c", "--cuda", default = False, action = "store_true", help = "Use CUDA to speed up training")
     parser.add_argument("-l", "--load", default = False, action = "store_true", help = "Load checkpoint or trained model.")
@@ -47,8 +48,22 @@ if __name__ == "__main__":
     use_load            = args.load
     load_path           = default_model_path + args.name
 
-    to_tensor = transforms.ToTensor()
     
+    to_tensor = transforms.Compose([
+        transforms.ColorJitter(0.25, 0.25, 0.25, 0.1),
+        transforms.RandomAdjustSharpness(2, 0.25),
+        transforms.RandomResizedCrop((32, 32)),
+        transforms.RandomEqualize(0.3),
+        transforms.RandomHorizontalFlip(0.5),
+        transforms.RandomVerticalFlip(0.3),
+        transforms.RandomGrayscale(0.2),
+        transforms.RandomRotation(7),
+        transforms.RandomEqualize(0.2),
+        transforms.ToTensor(),
+        transforms.Normalize(mean = [.5, .5, .5], std = [.5, .5, .5]),
+        transforms.RandomErasing(0.2),
+    ])
+
     device = torch.device(type = 'cpu')
     if use_cuda and torch.cuda.is_available():
         device = torch.device(0)
@@ -67,12 +82,11 @@ if __name__ == "__main__":
         model.loadFromFile(load_path)
     else:
         print("Not loading or load path '%s' does not exist."%(load_path))
-    loss_func = nn.CrossEntropyLoss()
+    loss_func = LabelSmoothingCrossEntropy(0.1)
     batch_num = len(train_set)
 
-    opt = optim.AdamW(model.parameters(), lr = 1e-4)
-    opt_sch = optim.lr_scheduler.MultiStepLR(opt, [3 * batch_num, 6 * batch_num, 9 * batch_num, 14 * batch_num], gamma = 0.1, last_epoch = -1)
-
+    opt = optim.AdamW(model.parameters(), lr = 5e-4, betas = (0.9, 0.999), weight_decay=args.weight_decay)
+    opt_sch = optim.lr_scheduler.MultiStepLR(opt, [10 * batch_num, 20 * batch_num, 30 * batch_num, 40 * batch_num], gamma = 0.1, last_epoch = -1)
     train_cnt = 0
     for ep in range(epochs):
         model.train()
@@ -83,8 +97,8 @@ if __name__ == "__main__":
             px:torch.Tensor = px.to(device)
             py:torch.Tensor = py.to(device)
             pred = model(px)
-            one_hot:torch.Tensor = makeOneHot(py, device)
-            loss = loss_func(pred, one_hot)
+            # one_hot:torch.Tensor = makeOneHot(py, device)
+            loss = loss_func(pred, py)
             train_acc_cnt += accCounter(pred, py)
             train_num += len(pred)
             opt.zero_grad()
@@ -104,8 +118,8 @@ if __name__ == "__main__":
                         pty:torch.Tensor = pty.to(device)
                         pred = model(ptx)
                         test_acc_cnt += accCounter(pred, pty)
-                        one_hot_test:torch.Tensor = makeOneHot(pty, device)
-                        test_loss += loss_func(pred, one_hot_test)
+                        # one_hot_test:torch.Tensor = makeOneHot(pty, device)
+                        test_loss += loss_func(pred, pty)
                     train_acc = train_acc_cnt / train_num
                     test_acc = test_acc_cnt / test_length
                     print("Epoch: %4d / %4d\t Batch %4d / %4d\t train loss: %.4f\t test loss: %.4f\t acc: %.4f\t test acc: %.4f\t lr: %f"%(
