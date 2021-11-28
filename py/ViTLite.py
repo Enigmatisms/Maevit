@@ -8,7 +8,7 @@
 import torch
 from torch import nn
 from torch.nn import parameter
-from TEncoder import TransformerEncoder
+from TEncoder import TransformerEncoder, TransformerEncoderV2
 
 class VitLite(nn.Module):
     """### Vision transformer-Lite
@@ -31,12 +31,12 @@ class VitLite(nn.Module):
         
         # position embeddings are additive
         self.pos_embds = parameter.Parameter(
-            torch.normal(0, 1, (batch_size, seq_len, emb_dim)), requires_grad = True
+            torch.normal(0, 1, (batch_size, seq_len + 1, emb_dim)), requires_grad = True
         )
         
         # In terms of making patches: (n, c, h, w) -> (n, patch_num, c, h, w) -> (n, seq_len, c * h * w)
         self.transformers = nn.Sequential(
-            *[TransformerEncoder(emb_dim, emb_dim, emb_dim, head_num) for _ in range(trans_num)]
+            *[TransformerEncoderV2(emb_dim, emb_dim, 0.1, head_num) for _ in range(trans_num)]
         ) 
         self.seq_len = seq_len
         self.emb_dim = emb_dim
@@ -48,12 +48,9 @@ class VitLite(nn.Module):
         
         # typical ViT has only one layer during fine-tuning time
         # ViT-Lite ain't no ordinary ViT XD, by default, I use CIFAR-10 which leads to 10 classes
-        self.output = nn.Sequential(
-            nn.Linear(emb_dim, emb_dim // 2),
-            nn.ReLU(True),
-            nn.Linear(emb_dim // 2, 10),
-            nn.Sigmoid()
-        )
+        self.output = nn.Linear(emb_dim, 10)
+
+        self.flatten = nn.Flatten(1, 3)
         
     def loadFromFile(self, load_path:str):
         save = torch.load(load_path)   
@@ -72,14 +69,15 @@ class VitLite(nn.Module):
         for i in range (self.seq_len):
             id_r = i // row_pnum
             id_c = i % col_pnum
-            patches[:, i, :] = images[:, :, id_r * self.patch_size : (id_r + 1) * self.patch_size,
-                    id_c * self.patch_size, (id_c + 1) * self.patch_size].view(-1, self.token_dim)
+            patches[:, i, :] = self.flatten(images[:, :, id_r * self.patch_size : (id_r + 1) * self.patch_size,
+                    id_c * self.patch_size : (id_c + 1) * self.patch_size])
         return patches
     
     def forward(self, X:torch.Tensor)->torch.Tensor:
         patches = self.makePatch(X)
         image_embs = self.tokenize(patches)
         embeddings = torch.cat((self.cls_token, image_embs), dim = 1)
+        embeddings = embeddings + self.pos_embds
 
         # output is (n, seq_len + 1, emb_dims)
         z = self.transformers(embeddings)
