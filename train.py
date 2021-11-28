@@ -51,22 +51,16 @@ if __name__ == "__main__":
     
     to_tensor = transforms.Compose([
         transforms.ColorJitter(0.25, 0.25, 0.25, 0.1),
-        transforms.RandomAdjustSharpness(2, 0.25),
-        transforms.RandomResizedCrop((32, 32)),
-        transforms.RandomEqualize(0.3),
         transforms.RandomHorizontalFlip(0.5),
         transforms.RandomVerticalFlip(0.3),
-        transforms.RandomGrayscale(0.2),
-        transforms.RandomRotation(7),
-        transforms.RandomEqualize(0.2),
         transforms.ToTensor(),
         transforms.Normalize(mean = [.5, .5, .5], std = [.5, .5, .5]),
-        transforms.RandomErasing(0.2),
     ])
 
     device = torch.device(type = 'cpu')
     if use_cuda and torch.cuda.is_available():
         device = torch.device(0)
+        print("Cuda is operationing")
     else:
         use_cuda = False
         print("CUDA not available.")
@@ -82,27 +76,18 @@ if __name__ == "__main__":
         model.loadFromFile(load_path)
     else:
         print("Not loading or load path '%s' does not exist."%(load_path))
-<<<<<<< HEAD
     loss_func = LabelSmoothingCrossEntropy(0.1)
     batch_num = len(train_set)
 
     opt = optim.AdamW(model.parameters(), lr = 5e-4, betas = (0.9, 0.999), weight_decay=args.weight_decay)
-    opt_sch = optim.lr_scheduler.MultiStepLR(opt, [10 * batch_num, 20 * batch_num, 30 * batch_num, 40 * batch_num], gamma = 0.1, last_epoch = -1)
-=======
-    loss_func = nn.CrossEntropyLoss()
-    batch_num = len(train_set)
-
-    opt = optim.AdamW(model.parameters(), lr = 1e-4)
-    opt_sch = optim.lr_scheduler.MultiStepLR(opt, [3 * batch_num, 6 * batch_num, 9 * batch_num, 14 * batch_num], gamma = 0.1, last_epoch = -1)
-
->>>>>>> 8f8d0588e20e9b3d3e3e134c248790019a050532
+    # opt_sch = optim.lr_scheduler.MultiStepLR(opt, [5 * batch_num, 10 * batch_num, 15 * batch_num, 20 * batch_num], gamma = 0.1, last_epoch = -1)
+    opt_sch = optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0 = 5, T_mult = 2, eta_min = 1e-7, last_epoch = -1)
     train_cnt = 0
     for ep in range(epochs):
         model.train()
         train_acc_cnt = 0
         train_num = 0
         for i, (px, py) in enumerate(train_set):
-            loss:torch.Tensor = torch.zeros(1).to(device)
             px:torch.Tensor = px.to(device)
             py:torch.Tensor = py.to(device)
             pred = model(px)
@@ -115,8 +100,8 @@ if __name__ == "__main__":
             opt.step()
             opt_sch.step()
             if train_cnt % eval_time == 1:
+                model.eval()
                 with torch.no_grad():
-                    model.eval()
                     ## wocao not optimizing at all, fuck
                     ## +++++++++++ Load from Test set ++++++++=
                     test_length = len(test_set) * batch_size
@@ -140,6 +125,7 @@ if __name__ == "__main__":
                     writer.add_scalar('Loss/Test loss', test_loss, train_cnt)
                     writer.add_scalar('Acc/Train Set Accuracy', train_acc, train_cnt)
                     writer.add_scalar('Acc/Test Set Accuracy', test_acc, train_cnt)
+                model.train()
             if train_cnt % chkpt_ntv == 0:
                 torch.save({
                     'model': model.state_dict(),
