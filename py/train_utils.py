@@ -33,4 +33,7 @@ def getCIFAR10Dataset(train, transform, batch_size):
         batch_size = batch_size, shuffle = train,
     )
 
+def CIFAR10Images(train, transform = None):
+    download = (len(os.listdir("./dataset/")) == 0)
+    return CIFAR10("./dataset/", train = train, download = download, transform = transform)
 

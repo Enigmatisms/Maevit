@@ -3,3 +3,4 @@ check_points/
 model/*
 logs/*
 /**/__pycache__
+imgs/*
