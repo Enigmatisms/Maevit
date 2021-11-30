@@ -9,6 +9,13 @@ from torchvision.datasets import CIFAR10
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
+from math import cos
+
+f = lambda x: -2.5575e-8 * x + 5e-4
+g = lambda x: 2.5e-4 * (0.99965**x)
+c = lambda x: cos(x / (100.0 + x * 0.010416666666))
+def lr(x):
+    return (f(x) - g(x)) * 0.5 * c(x) + (f(x) + g(x)) * 0.5
 
 def makeOneHot(labels:torch.Tensor, device)->torch.Tensor:
     dtype = labels.type()

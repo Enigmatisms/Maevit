@@ -6,6 +6,8 @@ import os
 import torch
 import argparse
 
+import torchvision
+
 from py.CCT import CCT
 
 from torch import optim
@@ -47,12 +49,16 @@ if __name__ == "__main__":
     chkpt_ntv           = args.chkpt_ntv
     use_load            = args.load
     load_path           = default_model_path + args.name
-
     
-    to_tensor = transforms.Compose([
+    aug_to_tensor = transforms.Compose([
         transforms.ColorJitter(0.25, 0.25, 0.25, 0.1),
         transforms.RandomHorizontalFlip(0.5),
         transforms.RandomVerticalFlip(0.3),
+        transforms.ToTensor(),
+        transforms.Normalize(mean = [.5, .5, .5], std = [.5, .5, .5]),
+    ])
+
+    to_tensor = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean = [.5, .5, .5], std = [.5, .5, .5]),
     ])
@@ -67,7 +73,7 @@ if __name__ == "__main__":
     
     writer = getSummaryWriter(epochs, del_dir)
 
-    train_set = getCIFAR10Dataset(True, to_tensor, batch_size)
+    train_set = getCIFAR10Dataset(True, aug_to_tensor, batch_size)
     test_set = getCIFAR10Dataset(False, to_tensor, batch_size)
     
     model:CCT = CCT()       # default parameters
@@ -79,9 +85,10 @@ if __name__ == "__main__":
     loss_func = LabelSmoothingCrossEntropy(0.1)
     batch_num = len(train_set)
 
-    opt = optim.AdamW(model.parameters(), lr = 5e-4, betas = (0.9, 0.999), weight_decay=args.weight_decay)
+    opt = optim.AdamW(model.parameters(), lr = 1.0, betas = (0.9, 0.999), weight_decay=args.weight_decay)
     # opt_sch = optim.lr_scheduler.MultiStepLR(opt, [5 * batch_num, 10 * batch_num, 15 * batch_num, 20 * batch_num], gamma = 0.1, last_epoch = -1)
-    opt_sch = optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0 = 5, T_mult = 2, eta_min = 1e-7, last_epoch = -1)
+    # opt_sch = optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0 = 5, T_mult = 2, eta_min = 5e-8, last_epoch = -1)
+    opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda=lr, last_epoch=-1)
     train_cnt = 0
     for ep in range(epochs):
         model.train()
