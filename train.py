@@ -13,6 +13,7 @@ from py.CCT import CCT
 from torch import optim
 from torchvision import transforms
 
+from py.LECosineAnnealing import LECosineAnnealingSmoothRestart
 from py.LabelSmoothing import LabelSmoothingCrossEntropy
 from py.train_utils import *
 
@@ -88,7 +89,8 @@ if __name__ == "__main__":
     opt = optim.AdamW(model.parameters(), lr = 1.0, betas = (0.9, 0.999), weight_decay=args.weight_decay)
     # opt_sch = optim.lr_scheduler.MultiStepLR(opt, [5 * batch_num, 10 * batch_num, 15 * batch_num, 20 * batch_num], gamma = 0.1, last_epoch = -1)
     # opt_sch = optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0 = 5, T_mult = 2, eta_min = 5e-8, last_epoch = -1)
-    opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda=lr, last_epoch=-1)
+    lec_sch_func = LECosineAnnealingSmoothRestart(5e-4, 5e-5, 1e-4, 5e-7, epochs * batch_num, 7, False)
+    opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda=lec_sch_func.lr, last_epoch=-1)
     train_cnt = 0
     for ep in range(epochs):
         model.train()
@@ -143,7 +145,7 @@ if __name__ == "__main__":
     torch.save({
         'model': model.state_dict(),
         'optimizer': opt.state_dict()},
-        "%s/model_1.pth"%(default_model_path)
+        "%s/model_2.pth"%(default_model_path)
     )
     writer.close()
     print("Output completed.")
