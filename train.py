@@ -6,8 +6,6 @@ import os
 import torch
 import argparse
 
-import torchvision
-
 from py.CCT import CCT
 
 from torch import optim
@@ -31,8 +29,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type = int, default = 20, help = "Training lasts for . epochs")
     parser.add_argument("--batch_size", type = int, default = 100, help = "Batch size for range image packs.")
-    parser.add_argument("--eval_time", type = int, default = 5, help = "Eval every <eval_time> batches.")
-    parser.add_argument("--chkpt_ntv", type = int, default = 50, help = "Interval for checkpoints.")
+    parser.add_argument("--eval_time", type = int, default = 100, help = "Eval every <eval_time> batches.")
+    parser.add_argument("--chkpt_ntv", type = int, default = 300, help = "Interval for checkpoints.")
     parser.add_argument("--name", type = str, default = "model_1.pth", help = "Model name for loading")
     parser.add_argument("--weight_decay", type = float, default = 3e-2, help = "Weight Decay in AdamW")
     parser.add_argument("-d", "--del_dir", action = "store_true", help = "Delete dir ./logs and start new tensorboard records")
@@ -52,16 +50,16 @@ if __name__ == "__main__":
     load_path           = default_model_path + args.name
     
     aug_to_tensor = transforms.Compose([
-        transforms.ColorJitter(0.25, 0.25, 0.25, 0.1),
+        transforms.ColorJitter(0.3, 0.3, 0.3, 0.2),
         transforms.RandomHorizontalFlip(0.5),
-        transforms.RandomVerticalFlip(0.3),
+        transforms.RandomResizedCrop((32, 32), (0.8, 1.0)),
         transforms.ToTensor(),
-        transforms.Normalize(mean = [.5, .5, .5], std = [.5, .5, .5]),
+        transforms.Normalize(mean = [0.4914, 0.4822, 0.4465], std = [0.2470, 0.2435, 0.2616]),
     ])
 
     to_tensor = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(mean = [.5, .5, .5], std = [.5, .5, .5]),
+        transforms.Normalize(mean = [0.4914, 0.4822, 0.4465], std = [0.2470, 0.2435, 0.2616]),
     ])
 
     device = torch.device(type = 'cpu')
@@ -89,7 +87,7 @@ if __name__ == "__main__":
     opt = optim.AdamW(model.parameters(), lr = 1.0, betas = (0.9, 0.999), weight_decay=args.weight_decay)
     # opt_sch = optim.lr_scheduler.MultiStepLR(opt, [5 * batch_num, 10 * batch_num, 15 * batch_num, 20 * batch_num], gamma = 0.1, last_epoch = -1)
     # opt_sch = optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0 = 5, T_mult = 2, eta_min = 5e-8, last_epoch = -1)
-    lec_sch_func = LECosineAnnealingSmoothRestart(5e-4, 5e-5, 1e-4, 5e-7, epochs * batch_num, 7, False)
+    lec_sch_func = LECosineAnnealingSmoothRestart(55e-5, 1e-4, 1e-4, 1e-5, epochs * batch_num, 64, True)
     opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda=lec_sch_func.lr, last_epoch=-1)
     train_cnt = 0
     for ep in range(epochs):
@@ -145,7 +143,7 @@ if __name__ == "__main__":
     torch.save({
         'model': model.state_dict(),
         'optimizer': opt.state_dict()},
-        "%s/model_2.pth"%(default_model_path)
+        "%smodel_1.pth"%(default_model_path)
     )
     writer.close()
     print("Output completed.")

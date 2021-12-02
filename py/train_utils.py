@@ -26,14 +26,14 @@ def getSummaryWriter(epochs:int, del_dir:bool):
     return SummaryWriter(log_dir = logdir + time_stamp)
 
 def getCIFAR10Dataset(train, transform, batch_size):
-    download = (len(os.listdir("./dataset/")) == 0)
+    download = (len(os.listdir("../dataset/")) == 0)
     return DataLoader(
-        CIFAR10("./dataset/", 
+        CIFAR10("../dataset/", 
             train = train, download = download, transform = transform),
         batch_size = batch_size, shuffle = train,
     )
 
 def CIFAR10Images(train, transform = None):
-    download = (len(os.listdir("./dataset/")) == 0)
-    return CIFAR10("./dataset/", train = train, download = download, transform = transform)
+    download = (len(os.listdir("../dataset/")) == 0)
+    return CIFAR10("../dataset/", train = train, download = download, transform = transform)
 
