@@ -47,21 +47,31 @@ class CCT(nn.Module):
             for _ in range(conv_num - 1):
                 self.conv.append(CCT.makeConvBlock(emb_dim, emb_dim, ksize))
         self.transformers = nn.Sequential(
-            *[TransformerEncoderV2(emb_dim, emb_dim, 0.0, head_num = 4) for _ in range(trans_num)]
+            *[TransformerEncoderV2(emb_dim, emb_dim, mlp_dropout=0.0, head_num = 4) for _ in range(trans_num)]
         )
         self.trans_num = trans_num
         self.sp = SeqPool(emb_dim)
+        self.pre_dropout = nn.Dropout(0.1)
         self.norm = nn.LayerNorm(emb_dim)
         self.classify = nn.Linear(emb_dim, 10)
         self.flatten = nn.Flatten(2, 3)
         for i in range(self.conv_num):
             self.conv[i].apply(self.init_weight)
-        
-    def forward(self, X:torch.Tensor):
+        self.seq_len = self.tokenize(torch.zeros(1, 3, 32, 32)).shape[1]
+        self.position_emb = nn.Parameter(torch.zeros(1, self.seq_len, emb_dim), requires_grad = True)
+        nn.init.trunc_normal_(self.position_emb, std = 0.2)
+
+    def tokenize(self, X:torch.Tensor)->torch.Tensor:
         for i in range(self.conv_num):
             X = self.conv[i](X)
         # reshape convolution outputs: (n, emb_dim, w0, h0)
-        X = self.flatten(X).transpose(-1, -2)
+        return self.flatten(X).transpose(-1, -2)
+        
+    def forward(self, X:torch.Tensor):
+        X = self.tokenize(X)
+        # train with positional embedding
+        X = X + self.position_emb
+        X = self.pre_dropout(X)
         X = self.transformers(X)
         # The problem is: LayerNorm? When to norm? Whether to norm？
         z = self.norm(X)

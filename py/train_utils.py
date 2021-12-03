@@ -30,7 +30,7 @@ def getCIFAR10Dataset(train, transform, batch_size):
     return DataLoader(
         CIFAR10("../dataset/", 
             train = train, download = download, transform = transform),
-        batch_size = batch_size, shuffle = train,
+        batch_size = batch_size, shuffle = train
     )
 
 def CIFAR10Images(train, transform = None):
