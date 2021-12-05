@@ -3,6 +3,7 @@
     CCT Training Module
 """
 import os
+from timm.data import mixup
 import torch
 import argparse
 from functools import partial
@@ -12,11 +13,11 @@ from torch.cuda import amp
 
 from py.CCT import CCT
 from py.train_utils import *
-from py.LabelSmoothing import LabelSmoothingCrossEntropy
-from py.LECosineAnnealing import LECosineAnnealingSmoothRestart
+from py.configs import mixup_args
+from timm.loss import SoftTargetCrossEntropy
 from timm.utils import NativeScaler
-from timm.models import model_parameters
 from timm.scheduler import CosineLRScheduler
+from timm.models import model_parameters
 
 default_chkpt_path = "./check_points/"
 default_model_path = "./model/"
@@ -29,6 +30,7 @@ parser.add_argument("--batch_size", type = int, default = 100, help = "Batch siz
 parser.add_argument("--eval_time", type = int, default = 50, help = "Eval every <eval_time> batches.")
 parser.add_argument("--cooldown_epoch", type = int, default = 10, help = "Epochs to cool down lr after cyclic lr.")
 parser.add_argument("--no_aug_epoch", type = int, default = 320, help = "The epoch when data augmentation is cancelled")
+parser.add_argument("--no_mix_epoch", type = int, default = 0, help = "The epoch when mixup & cutmix are cancelled")
 parser.add_argument("--eval_div", type = int, default = 5, help = "Output every <...> times in evaluation")
 parser.add_argument("--name", type = str, default = "model_1.pth", help = "Model name for loading")
 parser.add_argument("--weight_decay", type = float, default = 3e-2, help = "Weight Decay in AdamW")
@@ -41,6 +43,11 @@ parser.add_argument("-s", "--use_scaler", default = False, action = "store_true"
 args = parser.parse_args()
 
 # Calculate accurarcy (correct prediction counter)
+def oneHotAccCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
+    _, pred_max_pos = torch.max(pred, dim = 1)
+    _, gt_max_pos = torch.max(truth, dim = 1)
+    return torch.sum(pred_max_pos == gt_max_pos)
+
 def accCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
     _, max_pos = torch.max(pred, dim = 1)
     return torch.sum(max_pos == truth)
@@ -57,7 +64,9 @@ def main():
     use_amp             = args.use_scaler
     load_path           = default_model_path + args.name
     eval_div            = args.eval_div
+    no_mix_epoch        = args.no_mix_epoch
 
+    collate = FastCollate(mixup_args)
     train_set = getCIFAR10Dataset(True, True, batch_size)
     train_set_no_aug = getCIFAR10Dataset(True, False, batch_size)
     test_set = getCIFAR10Dataset(False, False, 100)
@@ -73,7 +82,8 @@ def main():
         model.loadFromFile(load_path)
     else:
         print("Not loading or load path '%s' does not exist."%(load_path))
-    loss_func = LabelSmoothingCrossEntropy(0.1).cuda()
+    loss_func = SoftTargetCrossEntropy().cuda()
+    eval_loss_func = torch.nn.CrossEntropyLoss().cuda()
     batch_num = len(train_set)
 
     augment_cancelled = False
@@ -90,20 +100,21 @@ def main():
     amp_scaler = None
     if use_amp:
         amp_scaler = NativeScaler()
-
     train_cnt = 0
     for ep in range(epochs):
         model.train()
         train_acc_cnt = 0
         train_num = 0
         writer.add_scalar('Learning Rate', opt_sch.get_last_lr()[-1], ep)
+        
         for i, (px, py) in enumerate(train_set):
+            px, py = collate.collate(px, py, ep < no_mix_epoch)
             px:torch.Tensor = px.cuda()
             py:torch.Tensor = py.cuda()
             with amp.autocast():
                 pred = model(px)
                 loss = loss_func(pred, py)
-            train_acc_cnt += accCounter(pred, py)
+            train_acc_cnt += oneHotAccCounter(pred, py)
             train_num += len(pred)
             opt.zero_grad()
             if not amp_scaler is None:
@@ -111,6 +122,8 @@ def main():
             else:
                 loss.backward()
                 opt.step()
+            torch.cuda.synchronize()            # Maybe Prefetch Loader needs sync
+
             if train_cnt % eval_time == 1:
                 train_acc = train_acc_cnt / train_num
                 print("Traning Epoch: %4d / %4d\t Batch %4d / %4d\t train loss: %.4f\t acc: %.4f\t lr: %f"%(
@@ -132,7 +145,7 @@ def main():
                 pty:torch.Tensor = pty.cuda()
                 pred = model(ptx)
                 test_acc_cnt += accCounter(pred, pty)
-                test_loss += loss_func(pred, pty)
+                test_loss += eval_loss_func(pred, pty)
                 if (j + 1) % 20 == 0:
                     test_acc = test_acc_cnt / 2000
                     test_loss /= 2000

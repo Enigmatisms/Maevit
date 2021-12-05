@@ -5,16 +5,18 @@
 import os
 import torch
 import shutil
-from torch._C import device
-from torchvision.datasets import CIFAR10
-from torch.utils.data.dataloader import DataLoader
+from torch.utils.data._utils import collate
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data.dataloader import DataLoader
 from datetime import datetime
 
+from torchvision.datasets import CIFAR10
 from torchvision import transforms
+
 from timm.data import RandomResizedCropAndInterpolation
 from timm.data.random_erasing import RandomErasing
-from math import cos
+from timm.data.mixup import FastCollateMixup, mixup_target
+from timm.data.loader import fast_collate
 
 def makeOneHot(labels:torch.Tensor, device)->torch.Tensor:
     dtype = labels.type()
@@ -30,17 +32,17 @@ def getSummaryWriter(epochs:int, del_dir:bool):
     time_stamp = "{0:%Y-%m-%d/%H-%M-%S}-epoch{1}/".format(datetime.now(), epochs)
     return SummaryWriter(log_dir = logdir + time_stamp)
 
-def getCIFAR10Dataset(train, augment, batch_size):
-    download = (len(os.listdir("./dataset/")) == 0)
+def getCIFAR10Dataset(train, augment, batch_size, collate_fn = None):
+    download = (len(os.listdir("../dataset/")) == 0)
     return DataLoader(
-        CIFAR10("./dataset/", 
-            train = train, download = download, transform = makeTransfrom(augment)),
+        CIFAR10("../dataset/", 
+            train = train, download = download, transform = makeTransfrom(augment)), collate_fn = collate_fn,
         batch_size = batch_size, shuffle = train, num_workers = 8, pin_memory = True, persistent_workers = True, drop_last=train
     )
 
 def CIFAR10Images(train, transform = None):
-    download = (len(os.listdir("./dataset/")) == 0)
-    return CIFAR10("./dataset/", train = train, download = download, transform = transform)
+    download = (len(os.listdir("../dataset/")) == 0)
+    return CIFAR10("../dataset/", train = train, download = download, transform = transform)
 
 def makeTransfrom(augment = False):
     if augment:
@@ -57,3 +59,20 @@ def makeTransfrom(augment = False):
             transforms.ToTensor(),
             transforms.Normalize(mean = [0.4914, 0.4822, 0.4465], std = [0.2470, 0.2435, 0.2616]),
         ])
+
+class FastCollate:
+    def __init__(self, mix_up_configs:dict) -> None:
+        self.collate_fn = FastCollateMixup(**mix_up_configs)
+        self.label_smoothing = mix_up_configs['label_smoothing']
+        self.num_classes = mix_up_configs['num_classes']
+
+    def collate(self, X:torch.Tensor, y:torch.Tensor, collate_enabled:bool = True):
+        if collate_enabled:
+            np_xs = [x.numpy() for x in X]
+            ys = [int(label) for label in y]
+            batch = list(zip(np_xs, ys))
+            output_x, output_y = self.collate_fn(batch)
+            return output_x.float(), output_y
+        else:
+            return X, mixup_target(y, self.num_classes, 1.0, self.label_smoothing, device='cpu')
+            
