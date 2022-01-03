@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from winMSA import WinMSA, SwinMSA
 from timm.models import DropPath
 
+#TODO: reverse shifting!
 # 2 in here is the expansion ratio
 def makeMLP(in_chan, mlp_dropout):
     return nn.Sequential(
@@ -69,3 +70,4 @@ class SwinTransformerLayer(nn.Module):
         X = self.layerForward(X, use_swin = True)
         # after attention op, tensor must be reshape back to the original shape
         return einops.rearrange(X, '(N m1 m2) (H W) C -> N C (m1 H) (m2 W)', N = bnum, m1 = self.M, m2 = self.M, H = size, W = size)
+        

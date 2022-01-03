@@ -8,6 +8,7 @@
 import torch
 from torch import nn
 import matplotlib.pyplot as plt
+from torch._C import device
 from torch.nn import functional as F
 
 # TODO: I have a problem: for swin layer (shift is applied), should relative positional embeddings be shifted?
@@ -21,20 +22,17 @@ class WinMSA(nn.Module):
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.Parameter):
             nn.init.kaiming_normal_(m)
-    def __init__(self, width, height, win_size, emb_dim = 96, head_num = 4) -> None:
+    def __init__(self, img_size, win_num = 7, emb_dim = 96, head_num = 4, device = 'cpu') -> None:
         super().__init__()
-        self.h = height
-        self.w = width
-        self.win_size = win_size
+        self.win_size = img_size // win_num
         self.emb_dim = emb_dim
-        self.win_h = height // win_size
-        self.win_w = width // win_size
-        self.s = win_size // 2
-        self.att_size = win_size ** 2       # this is actually sequence length, too
+        self.s = self.win_size // 2
+        self.att_size = self.win_size ** 2       # this is actually sequence length, too
         self.half_att_size = self.att_size // 2
         self.emb_dim_h_k = emb_dim // head_num
         self.normalize_coeff = self.emb_dim_h_k ** (-0.5)
         self.head_num = head_num
+        self.device = device
 
         # positional embeddings
         self.pe = nn.Parameter(torch.zeros(2 * self.att_size - 1, emb_dim), requires_grad = True)
@@ -46,18 +44,19 @@ class WinMSA(nn.Module):
         self.attn_drop = nn.Dropout(0.1)
         self.apply(self.init_weight)
 
-        # relative position embeddings
-    def getRelpeIndices(self):
-        all_indices = torch.arange(-self.att_size + 1, self.att_size).repeat(self.att_size, 1)
+    # relative position embeddings
+    def getRelpeIndices(self) -> torch.Tensor:
         totoal_relp = 2 * self.att_size - 1
+        all_indices = torch.roll(torch.arange(totoal_relp), self.att_size - 1).repeat(self.att_size, 1)
         all_indices = torch.hstack((all_indices, torch.zeros(self.att_size, 1)))
         all_indices = torch.concat((all_indices.view(-1), torch.zeros(self.att_size - 1))).view(-1, totoal_relp)
-        return all_indices[:self.att_size, -self.att_size:]
+        return all_indices[:self.att_size, -self.att_size:].to(self.device)
 
+    # TODO: This indexing might be false
     def attention(self, X:torch.Tensor, mask:None) -> torch.Tensor:
         batch_size, win_num, seq_len, _ = X.shape
         # input (b, win_num, seq_len, embedding_dim) while output of qkv attn is (b, seq_len, 3 * embedding_dim)
-        # output shape: (3, batch_size, win_num, head_num, seq_len, emb_dim / head_num)
+        # output (3, batch, win, head, seq, emb_dim/head_num) 0  1      2       3       4               5
         qkvs:torch.Tensor = self.qkv_attn(X).view(batch_size, win_num, seq_len, 3, self.head_num, self.emb_dim_h_k).permute(3, 0, 1, 4, 2, 5)
         q, k, v = qkvs[0], qkvs[1], qkvs[2]
         s = q @ self.pe[None, None, None, :, :].transpose(-2, -1)         # query directly mult pe (batch, win_num, head, seq, 2 * seq - 1)
@@ -78,9 +77,11 @@ class WinMSA(nn.Module):
 
 # default invariant shift: win_size / 2
 class SwinMSA(WinMSA):
-    def __init__(self, width, height, win_size, emb_dim = 96, head_num = 4) -> None:
-        WinMSA.__init__(width, height, win_size, emb_dim, head_num)
+    def __init__(self, img_size, win_num = 7, emb_dim = 96, head_num = 4) -> None:
+        WinMSA.__init__(img_size, win_num, emb_dim, head_num)
         self.att_mask = self.getAttentionMask()
+        self.win_h = img_size // self.win_size
+        self.win_w = img_size // self.win_size
 
     """
         shape of input tensor (batch_num, window_num, seq_length(number of embeddings in a window), emb_dim)
@@ -112,11 +113,7 @@ class SwinMSA(WinMSA):
         mask[-1, -1, :, :] = -100 * torch.ones(self.att_size, self.att_size)
         mask[-1, -1, :self.half_att_size, :self.half_att_size] = right_mask[:self.half_att_size, :self.half_att_size]
         mask[-1, -1, self.half_att_size:, self.half_att_size:] = right_mask[:self.half_att_size, :self.half_att_size]
-        return mask.view(-1, self.att_size, self.att_size)
-
-class SwinTransformerLayer(nn.Module):
-    def __init__(self, width, height, win_size, emb_dim) -> None:
-        super().__init__()
+        return mask.view(-1, self.att_size, self.att_size).to(self.device)
 
 if __name__ == "__main__":
     sw = SwinMSA(12, 12, 6, 1)
