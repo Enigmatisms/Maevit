@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 from torch.nn import functional as F
 
 # TODO: 1 relative positional <bias>! Not embeddings, be careful here
-# TODO: 2 shifting needs to be paired with a reversed shifting
 
 # The answer seems to be a 'No', for I think PE tends to learn the information after shifting
 class WinMSA(nn.Module):
@@ -37,7 +36,8 @@ class WinMSA(nn.Module):
 
         # positional embeddings
         self.positional_bias = nn.Parameter(torch.zeros(head_num, 2 * self.att_size - 1, 2 * self.att_size - 1), requires_grad = True)
-        self.relp_indices = WinMSA.getIndex(self.win_size)
+        # using register buffer, this tensor will be moved to cuda device if .cuda() is called, also it is stored in state_dict
+        self.register_buffer('relp_indices', WinMSA.getIndex(self.win_size))            
 
         self.qkv_attn = nn.Linear(emb_dim, emb_dim * 3, bias = False)
         self.proj_o = nn.Linear(emb_dim, emb_dim)

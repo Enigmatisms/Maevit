@@ -14,10 +14,10 @@ from timm.models import DropPath
 # 2 in here is the expansion ratio
 def makeMLP(in_chan, mlp_dropout):
     return nn.Sequential(
-        nn.Linear(in_chan, 2 * in_chan),
+        nn.Linear(in_chan, 4 * in_chan),
         nn.GELU(),
         nn.Dropout(mlp_dropout),
-        nn.Linear(2 * in_chan, in_chan),
+        nn.Linear(4 * in_chan, in_chan),
         nn.Dropout(mlp_dropout)
     )
 
@@ -31,7 +31,7 @@ class SwinTransformerLayer(nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
-    def __init__(self, M = 7, C = 256, img_size = 224, head_num = 4, mlp_dropout=0.1) -> None:
+    def __init__(self, M = 7, C = 96, img_size = 224, head_num = 4, mlp_dropout=0.1, patch_merge = False) -> None:
         super().__init__()
         self.M = M
         self.C = C
@@ -46,9 +46,16 @@ class SwinTransformerLayer(nn.Module):
         self.win_msa = WinMSA(img_size, img_size, self.win_size, C, head_num)
         self.swin_msa = SwinMSA(img_size, img_size, self.win_size, C, head_num)
         self.apply(self.init_weight)
+        self.merge_ln = None
+        self.patch_merge = patch_merge
+        if patch_merge == True:
+            self.merge_ln = nn.LayerNorm(4 * C)
 
     def merge(self, X:torch.Tensor)->torch.Tensor:
-        X = einops.rearrange(X, 'N C (m1 H) (m2 W) -> N (C m1 m2) H W', m1 = 2, m2 = 2)
+        # TODO: all the rearrange must be experimented. Will this procedure cause trouble? This needs to be tested in experiment
+        # TODO: record this in the notes
+        X = einops.rearrange(X, 'N wn (H m1) (W m2) C -> N wn H W (m1 m2 C)', m1 = 2, m2 = 2)
+        X = self.merge_ln(X)
         return self.merge_lin(X)
 
     def layerForward(self, X:torch.Tensor, use_swin = False) -> torch.Tensor:
@@ -59,15 +66,75 @@ class SwinTransformerLayer(nn.Module):
         return X + self.drop_path(tmp2)
 
     # (N, C, H, W) -> (N, C, H, W)
+    # TODO: This rearrange is bothering me 
+    # TODO: Since wn is directly next to Batch dimmention, it won't bother to merge batch dim and win_size dim
     def forward(self, X:torch.Tensor)->torch.Tensor:
-        bnum, _, size, _ = X.shape
+        bnum, size, _, _ = X.shape
         size //= self.M
-        X:torch.Tensor = einops.rearrange(X, 'N C (m1 H) (m2 W) -> N (m1 m2) (H W) C', m1 = self.M, m2 = self.M)
+        # patch partion is done in every layer
+        # This step seems useless
         # now X is of shape (N,  M * M, H/M * W/M, C), flattened in dim 0 and dim 1 for attention op
         X = self.layerForward(X)
         # shifting, do not forget this
-        X = torch.roll(X, shifts = (self.win_size // 2, self.win_size // 2), dims = (-1, -2))
+        X = einops.rearrange(X, 'N wn (H W) C -> N wn H W C')
+        X = torch.roll(X, shifts = (-(self.win_size >> 1), -(self.win_size >> 1)), dims = (-2, -3))
+        X = einops.rearrange(X, 'N wn H W C -> N wn (H W) C')
         X = self.layerForward(X, use_swin = True)
+        X = einops.rearrange(X, 'N wn (H W) C -> N wn H W C')
+        # inverse shifting procedure
+        X = torch.roll(X, shifts = (self.win_size >> 1, self.win_size >> 1), dims = (-1, -2))
         # after attention op, tensor must be reshape back to the original shape
-        return einops.rearrange(X, '(N m1 m2) (H W) C -> N C (m1 H) (m2 W)', N = bnum, m1 = self.M, m2 = self.M, H = size, W = size)
-        
+        if self.patch_merge:
+            X = self.merge(X)
+        X = einops.rearrange(X, 'N wn H W C -> N wn (H W) C')
+        return X
+
+"""
+    To my suprise, patching embedding generation in official implementation contains Conv2d... I thought this was conv-free
+    Patch partition and embedding generation in one shot, in the paper, it is said that:
+    'A linear embedding layer is applied on this raw-valued feature to project it to an arbitrary dimension (denoted as C)'
+"""
+class PatchEmbeddings(nn.Module):
+    def __init__(self, patch_size = 4, M = 7, C = 96, input_channel = 3, norm_layer = None) -> None:
+        super().__init__()
+        self.C = 256
+        self.M = M                  # M is the number of window in each direction
+        self.conv = nn.Conv2d(input_channel, C, kernel_size = patch_size, stride = patch_size)
+        if not norm_layer is None:
+            self.norm = norm_layer(C)
+        else:
+            self.norm = None
+
+    def forward(self, X:torch.Tensor) -> torch.Tensor:
+        X = self.conv(X)
+        if not self.norm is None:
+            X = self.norm(X)
+        X = X.permute(0, 2, 3, 1)
+        return einops.rearrange(X, 'N (m1 H) (m2 W) C -> N (m1 m2) (H W) C', m1 = self.M, m2 = self.M)
+        # output x is (N, (window_num ** 2), (img_size / patch_size / window_num)**2, C)
+
+class SwinTransformer(nn.Module):
+    def __init__(self, M = 7, C = 96, img_size = 224, head_num = 4, mlp_dropout=0.1, init_patch_size = 4) -> None:
+        super().__init__()
+        self.M = M
+        self.C = C
+        self.img_size = img_size
+        self.head_num = head_num
+        self.patch_embed = PatchEmbeddings(init_patch_size, M, C, 3)
+        current_img_size = img_size // init_patch_size
+        self.stage1_blocks = nn.ModuleList([
+            SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout), 
+            SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout, True)
+        ])
+        current_img_size >>= 1
+        self.stage2_blocks = nn.ModuleList([
+            SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout),
+            SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout, True)
+        ])
+        current_img_size >>= 1
+        self.stage3_blocks = nn.ModuleList([SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout) for _ in range(5)])
+        self.stage3_blocks.append(SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout, True))
+        current_img_size >>= 1
+        self.stage4_blocks = nn.ModuleList([SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout) for _ in range(2)])
+    # patch merging is implemented or not?
+    
