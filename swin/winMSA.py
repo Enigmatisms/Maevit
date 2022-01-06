@@ -8,10 +8,11 @@
 import torch
 from torch import nn
 import matplotlib.pyplot as plt
-from torch._C import device
 from torch.nn import functional as F
 
-# TODO: I have a problem: for swin layer (shift is applied), should relative positional embeddings be shifted?
+# TODO: 1 relative positional <bias>! Not embeddings, be careful here
+# TODO: 2 shifting needs to be paired with a reversed shifting
+
 # The answer seems to be a 'No', for I think PE tends to learn the information after shifting
 class WinMSA(nn.Module):
     @staticmethod
@@ -35,8 +36,8 @@ class WinMSA(nn.Module):
         self.device = device
 
         # positional embeddings
-        self.pe = nn.Parameter(torch.zeros(2 * self.att_size - 1, emb_dim), requires_grad = True)
-        self.relp_indices = self.getRelpeIndices()
+        self.positional_bias = nn.Parameter(torch.zeros(head_num, 2 * self.att_size - 1, 2 * self.att_size - 1), requires_grad = True)
+        self.relp_indices = WinMSA.getIndex(self.win_size)
 
         self.qkv_attn = nn.Linear(emb_dim, emb_dim * 3, bias = False)
         self.proj_o = nn.Linear(emb_dim, emb_dim)
@@ -44,26 +45,23 @@ class WinMSA(nn.Module):
         self.attn_drop = nn.Dropout(0.1)
         self.apply(self.init_weight)
 
-    # relative position embeddings
-    def getRelpeIndices(self) -> torch.Tensor:
-        totoal_relp = 2 * self.att_size - 1
-        all_indices = torch.roll(torch.arange(totoal_relp), self.att_size - 1).repeat(self.att_size, 1)
-        all_indices = torch.hstack((all_indices, torch.zeros(self.att_size, 1)))
-        all_indices = torch.concat((all_indices.view(-1), torch.zeros(self.att_size - 1))).view(-1, totoal_relp)
-        return all_indices[:self.att_size, -self.att_size:].to(self.device)
+    @staticmethod
+    def getIndex(win_size:int) -> torch.LongTensor:
+        ys, xs = torch.meshgrid(torch.arange(win_size), torch.arange(win_size), indexing = 'ij')
+        coords = torch.cat((ys.unsqueeze(dim = -1), xs.unsqueeze(dim = -1)), dim = -1).view(-1, 2)
+        diff = coords[None, :, :] - coords[:, None, :]          # interesting broadcasting, needs notes
+        diff += win_size - 1
+        index = diff[:, :, 0] * (2 * win_size - 1) + diff[:, :, 1]
+        return index
 
-    # TODO: This indexing might be false
     def attention(self, X:torch.Tensor, mask:None) -> torch.Tensor:
         batch_size, win_num, seq_len, _ = X.shape
         # input (b, win_num, seq_len, embedding_dim) while output of qkv attn is (b, seq_len, 3 * embedding_dim)
         # output (3, batch, win, head, seq, emb_dim/head_num) 0  1      2       3       4               5
         qkvs:torch.Tensor = self.qkv_attn(X).view(batch_size, win_num, seq_len, 3, self.head_num, self.emb_dim_h_k).permute(3, 0, 1, 4, 2, 5)
         q, k, v = qkvs[0], qkvs[1], qkvs[2]
-        s = q @ self.pe[None, None, None, :, :].transpose(-2, -1)         # query directly mult pe (batch, win_num, head, seq, 2 * seq - 1)
-        # Will this thing have big memory or speed overhead?
-        rpe = torch.gather(s, -1, self.relp_indices.repeat(batch_size, win_num, self.head_num, 1, 1))        # self.relp_indices is already a 2d tensor
-        # q @ k.T : shape (batch_size, win_num, head_num, seq, seq), att_mask added according to different window position
-        attn = q @ k.transpose(-1, -2) * self.normalize_coeff + rpe
+        # q @ k.T : shape (batch_size, win_num, head_num, seq, seq), att_mask added according to different window position  
+        attn = q @ k.transpose(-1, -2) * self.normalize_coeff + self.positional_bias.view(self.head_num, -1)[self.relp_indices.view(self.head_num, -1)].view(self.head_num, seq_len, seq_len)
         if not mask is None:
             attn = attn + mask[None, :, None, :, :]
         proba:torch.Tensor = F.softmax(attn, dim = -1)
