@@ -65,15 +65,9 @@ class SwinTransformerLayer(nn.Module):
         tmp2 = self.mlp(X)
         return X + self.drop_path(tmp2)
 
-    # (N, C, H, W) -> (N, C, H, W)
-    # TODO: This rearrange is bothering me 
-    # TODO: Since wn is directly next to Batch dimmention, it won't bother to merge batch dim and win_size dim
+    # (N, H, W, C) -> (N, H, W, C)
     def forward(self, X:torch.Tensor)->torch.Tensor:
-        bnum, size, _, _ = X.shape
-        size //= self.M
         # patch partion is done in every layer
-        # This step seems useless
-        # now X is of shape (N,  M * M, H/M * W/M, C), flattened in dim 0 and dim 1 for attention op
         X = self.layerForward(X)
         # shifting, do not forget this
         X = einops.rearrange(X, 'N wn (H W) C -> N wn H W C')
@@ -95,13 +89,13 @@ class SwinTransformerLayer(nn.Module):
     'A linear embedding layer is applied on this raw-valued feature to project it to an arbitrary dimension (denoted as C)'
 """
 class PatchEmbeddings(nn.Module):
-    def __init__(self, patch_size = 4, M = 7, C = 96, input_channel = 3, norm_layer = None) -> None:
+    def __init__(self, patch_size = 4, M = 7, out_channels = 48, input_channel = 3, norm_layer = None) -> None:
         super().__init__()
         self.C = 256
         self.M = M                  # M is the number of window in each direction
-        self.conv = nn.Conv2d(input_channel, C, kernel_size = patch_size, stride = patch_size)
+        self.conv = nn.Conv2d(input_channel, out_channels, kernel_size = patch_size, stride = patch_size)
         if not norm_layer is None:
-            self.norm = norm_layer(C)
+            self.norm = norm_layer(out_channels)
         else:
             self.norm = None
 
@@ -114,27 +108,42 @@ class PatchEmbeddings(nn.Module):
         # output x is (N, (window_num ** 2), (img_size / patch_size / window_num)**2, C)
 
 class SwinTransformer(nn.Module):
-    def __init__(self, M = 7, C = 96, img_size = 224, head_num = 4, mlp_dropout=0.1, init_patch_size = 4) -> None:
+    def __init__(self, M = 7, C = 96, img_size = 224, head_num = 4, mlp_dropout = 0.1, emb_dropout = 0.1, init_patch_size = 4) -> None:
         super().__init__()
         self.M = M
         self.C = C
         self.img_size = img_size
         self.head_num = head_num
-        self.patch_embed = PatchEmbeddings(init_patch_size, M, C, 3)
         current_img_size = img_size // init_patch_size
-        self.stage1_blocks = nn.ModuleList([
+        self.patch_embed = PatchEmbeddings(init_patch_size, M, C, 3)
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.emb_drop = nn.Dropout(emb_dropout)
+        self.swin_layers = nn.ModuleList([
             SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout), 
             SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout, True)
         ])
+        C <<= 1
         current_img_size >>= 1
-        self.stage2_blocks = nn.ModuleList([
+        self.swin_layers.extend([
             SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout),
             SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout, True)
         ])
+        C <<= 1
         current_img_size >>= 1
-        self.stage3_blocks = nn.ModuleList([SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout) for _ in range(5)])
-        self.stage3_blocks.append(SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout, True))
+        self.swin_layers.extend([SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout) for _ in range(5)])
+        self.swin_layers.append(SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout, True))
+        C <<= 1 
         current_img_size >>= 1
-        self.stage4_blocks = nn.ModuleList([SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout) for _ in range(2)])
+        self.swin_layers.extend([SwinTransformerLayer(M, C, current_img_size, head_num, mlp_dropout) for _ in range(2)])
+        self.classify = nn.Linear(C, 10)
+
+    def forward(self, X:torch.Tensor) -> torch.Tensor:
+        batch_size, _, _, _ = X.shape 
+        X = self.patch_embed(X)
+        X = self.emb_drop(X)
+        X = self.swin_layers(X)
+        channel_num = X.shape[-1]
+        X = X.view(batch_size, -1, channel_num).transpose(-1, -2)
+        return self.classify(self.avg_pool(X))
     # patch merging is implemented or not?
     
