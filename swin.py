@@ -13,12 +13,14 @@ from torch import optim
 from torch.cuda import amp
 from timm.utils import NativeScaler
 from timm.models import model_parameters
+from py.train_utils import *
+from swin.swinLayer import SwinTransformer
 
-# from timm.loss import SoftTargetCrossEntropy
-# from timm.scheduler import CosineLRScheduler
+from timm.loss import SoftTargetCrossEntropy
+from timm.scheduler import CosineLRScheduler
 
-default_chkpt_path = "./check_points/"
-default_model_path = "./model/"
+default_chkpt_path = "./check_points/swin_"
+default_model_path = "./model/swin_"
 
 torch.backends.cudnn.benchmark = True
 
@@ -47,6 +49,9 @@ def accCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
     # TODO: to be modified
     return 0
 
+def get_sch_lr(sch:CosineLRScheduler, start_lr:float, i:int)->float:
+    return sch.get_epoch_values(i)[0] * start_lr
+
 def main():
     epochs              = args.epochs
     eval_time           = args.eval_time
@@ -66,24 +71,22 @@ def main():
         exit(-1)
     device = torch.device(0)
     
-    # ======= instantiate model =====
-    # NOTE: model is recommended to have loadFromFile method
-    # model = Model()
-    # if use_load == True and os.path.exists(load_path):
-    #     model.loadFromFile(load_path)
-    # else:
-    #     print("Not loading or load path '%s' does not exist."%(load_path))
+    model = SwinTransformer(7, 96, 224, (2, 2, 6, 2))
+    if use_load == True and os.path.exists(load_path):
+        model.loadFromFile(load_path)
+    else:
+        print("Not loading or load path '%s' does not exist."%(load_path))
 
     # ======= Loss function ==========
-    # loss_func = SoftTargetCrossEntropy().cuda()
-    # eval_loss_func = torch.nn.CrossEntropyLoss().cuda()
+    loss_func = SoftTargetCrossEntropy().cuda()
+    eval_loss_func = torch.nn.CrossEntropyLoss().cuda()
 
     # ======= Optimizer and scheduler ========
-    # opt = optim.AdamW(model.parameters(), lr = 1.0, betas = (0.9, 0.999), weight_decay=args.weight_decay)
-    # min_max_ratio = args.min_lr / args.max_lr
-    # lec_sch_func = CosineLRScheduler(opt, t_initial = epochs // 2, t_mul = 1, lr_min = min_max_ratio, decay_rate = 0.1,
-    #         warmup_lr_init = min_max_ratio, warmup_t = 10, cycle_limit = 2, t_in_epochs = True)
-    # opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda = partial(get_sch_lr, lec_sch_func, args.max_lr), last_epoch=-1)
+    opt = optim.AdamW(model.parameters(), lr = 1.0, betas = (0.9, 0.999), weight_decay=args.weight_decay)
+    min_max_ratio = args.min_lr / args.max_lr
+    lec_sch_func = CosineLRScheduler(opt, t_initial = epochs // 2, t_mul = 1, lr_min = min_max_ratio, decay_rate = 0.1,
+            warmup_lr_init = min_max_ratio, warmup_t = 10, cycle_limit = 2, t_in_epochs = True)
+    opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda = partial(get_sch_lr, lec_sch_func, args.max_lr), last_epoch=-1)
 
     epochs = 0  # lec_sch_func.get_cycle_length() + args.cooldown_epoch
     

@@ -10,25 +10,15 @@ from torch import nn
 import matplotlib.pyplot as plt
 from torch.nn import functional as F
 
-# TODO: 1 relative positional <bias>! Not embeddings, be careful here
-
 # The answer seems to be a 'No', for I think PE tends to learn the information after shifting
 class WinMSA(nn.Module):
-    @staticmethod
-    def init_weight(m):
-        if isinstance(m, nn.Linear):
-            nn.init.trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.Parameter):
-            nn.init.kaiming_normal_(m)
-    def __init__(self, img_size, win_num = 7, emb_dim = 96, head_num = 4, device = 'cpu') -> None:
+    def __init__(self, win_size = 7, emb_dim = 96, head_num = 4, device = 'cpu') -> None:
         super().__init__()
-        self.win_size = img_size // win_num
+        self.win_size = win_size                    # window size is fixed (in the paper: M = 7)
         self.emb_dim = emb_dim
-        self.s = self.win_size // 2
+        self.s = self.win_size >> 1                 # quote: displacing the window by floor(M / 2)
         self.att_size = self.win_size ** 2       # this is actually sequence length, too
-        self.half_att_size = self.att_size // 2
+        
         self.emb_dim_h_k = emb_dim // head_num
         self.normalize_coeff = self.emb_dim_h_k ** (-0.5)
         self.head_num = head_num
@@ -43,7 +33,6 @@ class WinMSA(nn.Module):
         self.proj_o = nn.Linear(emb_dim, emb_dim)
         self.proj_drop = nn.Dropout(0.1)
         self.attn_drop = nn.Dropout(0.1)
-        self.apply(self.init_weight)
 
     @staticmethod
     def getIndex(win_size:int) -> torch.LongTensor:
@@ -61,7 +50,9 @@ class WinMSA(nn.Module):
         qkvs:torch.Tensor = self.qkv_attn(X).view(batch_size, win_num, seq_len, 3, self.head_num, self.emb_dim_h_k).permute(3, 0, 1, 4, 2, 5)
         q, k, v = qkvs[0], qkvs[1], qkvs[2]
         # q @ k.T : shape (batch_size, win_num, head_num, seq, seq), att_mask added according to different window position  
-        attn = q @ k.transpose(-1, -2) * self.normalize_coeff + self.positional_bias.view(self.head_num, -1)[self.relp_indices.view(self.head_num, -1)].view(self.head_num, seq_len, seq_len)
+        attn = q @ k.transpose(-1, -2) * self.normalize_coeff
+        print(self.relp_indices.shape, self.positional_bias.shape, seq_len, self.win_size, X.shape, attn.shape)
+        attn = attn + self.positional_bias.view(self.head_num, -1)[:, self.relp_indices.view(-1)].view(self.head_num, seq_len, seq_len)
         if not mask is None:
             attn = attn + mask[None, :, None, :, :]
         proba:torch.Tensor = F.softmax(attn, dim = -1)
@@ -75,11 +66,13 @@ class WinMSA(nn.Module):
 
 # default invariant shift: win_size / 2
 class SwinMSA(WinMSA):
-    def __init__(self, img_size, win_num = 7, emb_dim = 96, head_num = 4) -> None:
-        WinMSA.__init__(img_size, win_num, emb_dim, head_num)
+    def __init__(self, img_size, win_size = 7, emb_dim = 96, head_num = 4) -> None:
+        super().__init__(win_size, emb_dim, head_num)
+        self.win_h = img_size // win_size
+        self.win_w = img_size // win_size
+        # note that if win_size is odd, implementation will be the previous one, in which "half_att_size" is truely att_size / 2 
+        self.half_att_size = (self.s + 1) * win_size
         self.att_mask = self.getAttentionMask()
-        self.win_h = img_size // self.win_size
-        self.win_w = img_size // self.win_size
 
     """
         shape of input tensor (batch_num, window_num, seq_length(number of embeddings in a window), emb_dim)
@@ -93,14 +86,14 @@ class SwinMSA(WinMSA):
         mask = torch.zeros(self.win_h, self.win_w, self.att_size, self.att_size)
         # process the rightmost column
         rightmost = torch.ones(self.win_size, self.win_size)
-        rightmost[:, self.s:] = -torch.ones(self.win_size, self.s)
+        rightmost[:, self.s + 1:] = -torch.ones(self.win_size, self.s)
         rightmost = rightmost.view(-1, 1)
         raw_mask = rightmost @ rightmost.transpose(0, 1)
         right_mask = torch.zeros_like(raw_mask)
         right_mask = right_mask.masked_fill(raw_mask < 0, -100)
         # process the bottom row
         bottom = torch.ones(self.win_size, self.win_size)
-        bottom[self.s:, :] = -torch.ones(self.s, self.win_size)
+        bottom[self.s + 1:, :] = -torch.ones(self.s, self.win_size)
         bottom = bottom.view(-1, 1)
         raw_mask = bottom @ bottom.transpose(0, 1)
         bottom_mask = torch.zeros_like(bottom)
@@ -110,12 +103,11 @@ class SwinMSA(WinMSA):
         mask[-1, :-1, :, :] = bottom_mask
         mask[-1, -1, :, :] = -100 * torch.ones(self.att_size, self.att_size)
         mask[-1, -1, :self.half_att_size, :self.half_att_size] = right_mask[:self.half_att_size, :self.half_att_size]
-        mask[-1, -1, self.half_att_size:, self.half_att_size:] = right_mask[:self.half_att_size, :self.half_att_size]
+        mask[-1, -1, self.half_att_size:, self.half_att_size:] = right_mask[self.half_att_size:, self.half_att_size:]
         return mask.view(-1, self.att_size, self.att_size).to(self.device)
 
 if __name__ == "__main__":
-    sw = SwinMSA(12, 12, 6, 1)
-    print(sw.getRelpeIndices())
+    sw = SwinMSA(14, 7, 1, 1)
     mask = sw.getAttentionMask()
     for i in range(mask.shape[0]):
         plt.figure(i)
