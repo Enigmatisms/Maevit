@@ -43,14 +43,6 @@ parser.add_argument("-s", "--use_scaler", default = False, action = "store_true"
 args = parser.parse_args()
 
 # Calculate accurarcy (correct prediction counter)
-def oneHotAccCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
-    _, pred_max_pos = torch.max(pred, dim = 1)
-    _, gt_max_pos = torch.max(truth, dim = 1)
-    return torch.sum(pred_max_pos == gt_max_pos)
-
-def accCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
-    _, max_pos = torch.max(pred, dim = 1)
-    return torch.sum(max_pos == truth)
 
 def get_sch_lr(sch:CosineLRScheduler, start_lr:float, i:int)->float:
     return sch.get_epoch_values(i)[0] * start_lr

@@ -44,6 +44,15 @@ def CIFAR10Images(train, transform = None):
     download = (len(os.listdir("../dataset/")) == 0)
     return CIFAR10("../dataset/", train = train, download = download, transform = transform)
 
+def oneHotAccCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
+    _, pred_max_pos = torch.max(pred, dim = 1)
+    _, gt_max_pos = torch.max(truth, dim = 1)
+    return torch.sum(pred_max_pos == gt_max_pos)
+
+def accCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
+    _, max_pos = torch.max(pred, dim = 1)
+    return torch.sum(max_pos == truth)
+
 def makeTransfrom(augment = False):
     if augment:
         return transforms.Compose([

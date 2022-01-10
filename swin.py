@@ -18,6 +18,7 @@ from swin.swinLayer import SwinTransformer
 
 from timm.loss import SoftTargetCrossEntropy
 from timm.scheduler import CosineLRScheduler
+from timm.data import create_loader, create_dataset
 
 default_chkpt_path = "./check_points/swin_"
 default_model_path = "./model/swin_"
@@ -29,7 +30,7 @@ parser.add_argument("--epochs", type = int, default = 20, help = "Training lasts
 parser.add_argument("--batch_size", type = int, default = 100, help = "Batch size for range image packs.")
 parser.add_argument("--eval_time", type = int, default = 50, help = "Eval every <eval_time> batches.")
 parser.add_argument("--cooldown_epoch", type = int, default = 10, help = "Epochs to cool down lr after cyclic lr.")
-parser.add_argument("--eval_div", type = int, default = 5, help = "Output every <...> times in evaluation")
+parser.add_argument("--eval_div", type = int, default = 5, help = "Output every <...> times in evaluation. Match ticks with training")
 parser.add_argument("--name", type = str, default = "model_1.pth", help = "Model name for loading")
 parser.add_argument("--weight_decay", type = float, default = 3e-2, help = "Weight Decay in AdamW")
 parser.add_argument("--max_lr", type = float, default = 55e-5, help = "Max learning rate")
@@ -39,22 +40,13 @@ parser.add_argument("-l", "--load", default = False, action = "store_true", help
 parser.add_argument("-s", "--use_scaler", default = False, action = "store_true", help = "Use AMP scaler to speed up")
 args = parser.parse_args()
 
-# Calculate accurarcy (correct prediction counter)
-def oneHotAccCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
-    _, pred_max_pos = torch.max(pred, dim = 1)
-    _, gt_max_pos = torch.max(truth, dim = 1)
-    return torch.sum(pred_max_pos == gt_max_pos)
-
-def accCounter(pred:torch.FloatTensor, truth:torch.FloatTensor)->int:
-    # TODO: to be modified
-    return 0
-
 def get_sch_lr(sch:CosineLRScheduler, start_lr:float, i:int)->float:
     return sch.get_epoch_values(i)[0] * start_lr
 
 def main():
     epochs              = args.epochs
     eval_time           = args.eval_time
+    eval_div            = args.eval_div
     use_amp             = args.use_scaler
     batch_size          = args.batch_size
     del_dir             = args.del_dir
@@ -62,8 +54,12 @@ def main():
     load_path           = default_model_path + args.name
 
     # ======= load train set and test set =======
-    train_set = None            # getDataset()
-    test_set = None             # getDataset()
+    train_set = create_dataset("Imagenette_train", "../dataset/imagenette2-320/", "train", is_training = True)
+    test_set = create_dataset("Imagenette_val", "../dataset/imagenette2-320/", "val", is_training = False)
+    train_loader = create_loader(train_set, 224, batch_size, True, 
+        use_prefetcher = False, num_workers = 4, pin_memory = True, persistent_workers = True)
+    test_loader = create_loader(test_set, 224, 100, True, use_prefetcher = False, 
+        num_workers = 8, pin_memory = True, persistent_workers = True)
 
     device = None
     if not torch.cuda.is_available():
@@ -91,54 +87,50 @@ def main():
     epochs = 0  # lec_sch_func.get_cycle_length() + args.cooldown_epoch
     
     # ====== tensorboard summary writer ======
-    # writer = getSummaryWriter(epochs, del_dir)
+    writer = getSummaryWriter(epochs, del_dir)
 
     amp_scaler = None
     if use_amp:
         amp_scaler = NativeScaler()
     train_cnt = 0
+    batch_num = len(train_loader)
     for ep in range(epochs):
-        # model.train()
+        model.train()
         train_acc_cnt = 0
         train_num = 0
-        # writer.add_scalar('Learning Rate', opt_sch.get_last_lr()[-1], ep)
+        writer.add_scalar('Learning Rate', opt_sch.get_last_lr()[-1], ep)
         
-        for i, (px, py) in enumerate(train_set):
+        for i, (px, py) in enumerate(train_loader):
             px:torch.Tensor = px.cuda()
             py:torch.Tensor = py.cuda()
-            # ====== Auto Mixture Precision ======
-            # with amp.autocast():
-            #     pred = model(px)
-            #     loss = loss_func(pred, py)
+            with amp.autocast():
+                pred = model(px)
+                loss:torch.Tensor = loss_func(pred, py)
 
-            # ======== Accuracy Counter ========
-            # train_acc_cnt += oneHotAccCounter(pred, py)
-            # train_num += len(pred)
+            train_acc_cnt += accCounter(pred, py)
+            train_num += len(pred)
 
-            # ============ optimization and amp =============
-            # opt.zero_grad()
-            # if not amp_scaler is None:
-            #     amp_scaler(loss, opt, clip_grad=None, parameters = model_parameters(model), create_graph = False)
-            # else:
-            #     loss.backward()
-            #     opt.step()
-            # torch.cuda.synchronize()            # Maybe Prefetch Loader needs sync
+            opt.zero_grad()
+            if not amp_scaler is None:
+                amp_scaler(loss, opt, clip_grad=None, parameters = model_parameters(model), create_graph = False)
+            else:
+                loss.backward()
+                opt.step()
+            torch.cuda.synchronize()            # Maybe Prefetch Loader needs sync
 
             if train_cnt % eval_time == 1:
                 train_acc = train_acc_cnt / train_num
-                # ========= Evaluation output ========
-                # print("Traning Epoch: %4d / %4d\t Batch %4d / %4d\t train loss: %.4f\t acc: %.4f\t lr: %f"%(
-                #         ep, epochs, i, batch_num, loss.item(), train_acc, opt_sch.get_last_lr()[-1]
-                # ))
-                # writer.add_scalar('Loss/Train Loss', loss, train_cnt)
-                # writer.add_scalar('Acc/Train Set Accuracy', train_acc, train_cnt)
+                print("Traning Epoch: %4d / %4d\t Batch %4d / %4d\t train loss: %.4f\t acc: %.4f\t lr: %f"%(
+                        ep, epochs, i, batch_num, loss.item(), train_acc, opt_sch.get_last_lr()[-1]
+                ))
+                writer.add_scalar('Loss/Train Loss', loss, train_cnt)
+                writer.add_scalar('Acc/Train Set Accuracy', train_acc, train_cnt)
                 train_num = 0
                 train_acc_cnt = 0
             train_cnt += 1
 
-        # model.eval()
+        model.eval()
         with torch.no_grad():
-            ## +++++++++++ Load from Test set ++++++++=
             test_acc_cnt = 0
             test_loss:torch.Tensor = torch.zeros(1, device = device)
             eval_out_cnt = 0
@@ -146,41 +138,35 @@ def main():
                 ptx:torch.Tensor = ptx.cuda()
                 pty:torch.Tensor = pty.cuda()
 
-                # =========== Test Evaluation ==========
-                # pred = model(ptx)
-                # test_acc_cnt += accCounter(pred, pty)
-                # test_loss += eval_loss_func(pred, pty)
+                pred = model(ptx)
+                test_acc_cnt += accCounter(pred, pty)
+                test_loss += eval_loss_func(pred, pty)
                 if (j + 1) % 20 == 0:
                     test_acc = test_acc_cnt / 2000
                     test_loss /= 2000
 
-                    # ============= Test output ===========
-                    # writer.add_scalar('Loss/Test loss', test_loss, eval_div * ep + eval_out_cnt)
-                    # writer.add_scalar('Acc/Test Set Accuracy', test_acc, eval_div * ep + eval_out_cnt)
-                    # print("Evalutaion in epoch: %4d / %4d\t evalutaion step: %d\t test loss: %.4f\t test acc: %.4f\t lr: %f"%(
-                    #     ep, epochs, eval_out_cnt, test_loss.item(), test_acc, opt_sch.get_last_lr()[-1]
-                    # ))
+                    writer.add_scalar('Loss/Test loss', test_loss, eval_div * ep + eval_out_cnt)
+                    writer.add_scalar('Acc/Test Set Accuracy', test_acc, eval_div * ep + eval_out_cnt)
+                    print("Evalutaion in epoch: %4d / %4d\t evalutaion step: %d\t test loss: %.4f\t test acc: %.4f\t lr: %f"%(
+                        ep, epochs, eval_out_cnt, test_loss.item(), test_acc, opt_sch.get_last_lr()[-1]
+                    ))
                     eval_out_cnt += 1
                     test_acc_cnt = 0
                     test_loss.zero_()
-        # ========= A Must: convert model back to training mode ========
-        # model.train()
+        model.train()
 
-        # ======== Saving checkpoints ========
-        # torch.save({
-        #     'model': model.state_dict(),
-        #     'optimizer': opt.state_dict()},
-        #     "%schkpt_%d.pt"%(default_chkpt_path, train_cnt)
-        # )
-        # opt_sch.step()
-
-    # ======== Saving the model ========
-    # torch.save({
-    #     'model': model.state_dict(),
-    #     'optimizer': opt.state_dict()},
-    #     "%smodel_4.pth"%(default_model_path)
-    # )
-    # writer.close()
+        torch.save({
+            'model': model.state_dict(),
+            'optimizer': opt.state_dict()},
+            "%schkpt_%d.pt"%(default_chkpt_path, train_cnt)
+        )
+        opt_sch.step()
+    torch.save({
+        'model': model.state_dict(),
+        'optimizer': opt.state_dict()},
+        "%smodel_4.pth"%(default_model_path)
+    )
+    writer.close()
     print("Output completed.")
 
 if __name__ == "__main__":
