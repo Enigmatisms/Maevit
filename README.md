@@ -2,12 +2,20 @@
 
 ---
 
-​		Unofficial implementation of Vision Transformer and its variants: ViT-Lite, Compact Vision Transformer and Compact Convolution Transformer:
+(1) Unofficial implementation of **<u>Vision Transformer</u>** and its variants: **<u>ViT-Lite, Compact Vision Transformer and Compact Convolution Transformer</u>**:
 
 - [Dosovitskiy A, Beyer L, Kolesnikov A, et al. An image is worth 16x16 words: Transformers for image recognition at scale[J]. arXiv preprint arXiv:2010.11929, 2020.](https://arxiv.org/abs/2010.11929)
 - [Hassani A, Walton S, Shah N, et al. Escaping the big data paradigm with compact transformers[J]. arXiv preprint arXiv:2104.05704, 2021.](https://arxiv.org/abs/2104.05704)
 
 ​		For more information, plz refer to my blog post: [Event Horizon: Vision Transformers](https://enigmatisms.github.io/2021/11/28/Vision-Transformers/).
+
+(2) Unofficial implementation of **<u>Swin Transformer</u>**.
+
+- [Liu, Ze, et al. "Swin transformer: Hierarchical vision transformer using shifted windows." *arXiv preprint arXiv:2103.14030* (2021).](https://arxiv.org/abs/2103.14030)
+
+​		For more information, plz refer to my blog post: [Event Horizon: Swin Transformer复现](https://enigmatisms.github.io/2022/01/10/Swin-Transformer%E5%A4%8D%E7%8E%B0/).
+
+​		For swin transformer, guide for running the code is omitted (for it closely resembles to that of CCT).
 
 ---
 
@@ -39,6 +47,11 @@ python3 -m pip install -r requirements.txt
 ├── train.sh --- Script for training
 ├── train.py --- Python main module
 ├── plot.sh --- quick tensorboard intialization script
+├── test --- quick testing script
+	 ├── ...
+├── swin
+	 ├── swinLayer.py --- swin transformer class definition
+	 └── wniMSA.py	--- window-based and shifted-window-based multihead attention block definition
 └── py/ 
 	 ├── CCT.py  --- Compact Convolution Transformer class
 	 ├── LECosineAnnealing.py --- LECAWS lr, see my blog for more info
@@ -78,5 +91,5 @@ sudo chmod +x ./train.sh
 
 ![](https://enigmatisms.github.io/2021/11/28/Vision-Transformers/Screenshot%20from%202021-12-07%2019-40-38.png)
 
-
+​		No result available for swin transformer on ImageNet. Swin transformer is trained on imagenette2-320, which has not been fully trained, **<u>yet</u>**.
 
