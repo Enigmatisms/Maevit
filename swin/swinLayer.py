@@ -7,7 +7,7 @@ import torch
 import einops
 from torch import nn
 from torch.nn import functional as F
-from winMSA import WinMSA, SwinMSA
+from swin.winMSA import WinMSA, SwinMSA
 from timm.models.layers.drop import DropPath
 
 #TODO: reverse shifting!
@@ -146,22 +146,23 @@ class SwinTransformer(nn.Module):
         state_dict = {k:v for k, v in save_model.items()}
         model_dict.update(state_dict)
         self.load_state_dict(model_dict) 
-        print("CCT Model loaded from '%s'"%(load_path))
+        print("Swin Transformer Model loaded from '%s'"%(load_path))
 
     def forward(self, X:torch.Tensor) -> torch.Tensor:
         batch_size, _, _, _ = X.shape 
         X = self.patch_embed(X)
         X = self.emb_drop(X)
-        for i, layer in enumerate(self.swin_layers):
-            print(i)
+        for _, layer in enumerate(self.swin_layers):
             X = layer(X)
         channel_num = X.shape[-1]
         X = X.view(batch_size, -1, channel_num).transpose(-1, -2)
         X = self.avg_pool(X).transpose(-1, -2)
-        return self.classify(X)
+        return self.classify(X).squeeze(dim = 1)
     
 if __name__ == "__main__":
-    stm = SwinTransformer(7, 96, 224)
-    test_image = torch.normal(0, 1, (4, 3, 224, 224))
+    stm = SwinTransformer(7, 96, 224).cuda()
+    # for blc in stm.parameters():
+    #     print(blc.device)
+    test_image = torch.normal(0, 1, (4, 3, 224, 224)).cuda()
     result = stm.forward(test_image)
     

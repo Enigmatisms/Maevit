@@ -8,11 +8,12 @@
 import torch
 from torch import nn
 import matplotlib.pyplot as plt
+from torch.cuda import device
 from torch.nn import functional as F
 
 # The answer seems to be a 'No', for I think PE tends to learn the information after shifting
 class WinMSA(nn.Module):
-    def __init__(self, win_size = 7, emb_dim = 96, head_num = 4, device = 'cpu') -> None:
+    def __init__(self, win_size = 7, emb_dim = 96, head_num = 4) -> None:
         super().__init__()
         self.win_size = win_size                    # window size is fixed (in the paper: M = 7)
         self.emb_dim = emb_dim
@@ -22,7 +23,6 @@ class WinMSA(nn.Module):
         self.emb_dim_h_k = emb_dim // head_num
         self.normalize_coeff = self.emb_dim_h_k ** (-0.5)
         self.head_num = head_num
-        self.device = device
 
         # positional embeddings
         self.positional_bias = nn.Parameter(torch.zeros(head_num, 2 * self.att_size - 1, 2 * self.att_size - 1), requires_grad = True)
@@ -51,7 +51,7 @@ class WinMSA(nn.Module):
         q, k, v = qkvs[0], qkvs[1], qkvs[2]
         # q @ k.T : shape (batch_size, win_num, head_num, seq, seq), att_mask added according to different window position  
         attn = q @ k.transpose(-1, -2) * self.normalize_coeff
-        print(self.relp_indices.shape, self.positional_bias.shape, seq_len, self.win_size, X.shape, attn.shape)
+        # print(self.relp_indices.shape, self.positional_bias.shape, seq_len, self.win_size, X.shape, attn.shape)
         attn = attn + self.positional_bias.view(self.head_num, -1)[:, self.relp_indices.view(-1)].view(self.head_num, seq_len, seq_len)
         if not mask is None:
             attn = attn + mask[None, :, None, :, :]
@@ -66,13 +66,13 @@ class WinMSA(nn.Module):
 
 # default invariant shift: win_size / 2
 class SwinMSA(WinMSA):
-    def __init__(self, img_size, win_size = 7, emb_dim = 96, head_num = 4) -> None:
+    def __init__(self, img_size, win_size = 7, emb_dim = 96, head_num = 4, device = 'cpu') -> None:
         super().__init__(win_size, emb_dim, head_num)
         self.win_h = img_size // win_size
         self.win_w = img_size // win_size
         # note that if win_size is odd, implementation will be the previous one, in which "half_att_size" is truely att_size / 2 
         self.half_att_size = (self.s + 1) * win_size
-        self.att_mask = self.getAttentionMask()
+        self.register_buffer('att_mask', self.getAttentionMask())
 
     """
         shape of input tensor (batch_num, window_num, seq_length(number of embeddings in a window), emb_dim)
@@ -104,10 +104,10 @@ class SwinMSA(WinMSA):
         mask[-1, -1, :, :] = -100 * torch.ones(self.att_size, self.att_size)
         mask[-1, -1, :self.half_att_size, :self.half_att_size] = right_mask[:self.half_att_size, :self.half_att_size]
         mask[-1, -1, self.half_att_size:, self.half_att_size:] = right_mask[self.half_att_size:, self.half_att_size:]
-        return mask.view(-1, self.att_size, self.att_size).to(self.device)
+        return mask.view(-1, self.att_size, self.att_size)
 
 if __name__ == "__main__":
-    sw = SwinMSA(14, 7, 1, 1)
+    sw = SwinMSA(14, 7, 1, 1, device = 'cuda:0').cuda()
     mask = sw.getAttentionMask()
     for i in range(mask.shape[0]):
         plt.figure(i)

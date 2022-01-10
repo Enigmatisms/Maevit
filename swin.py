@@ -16,7 +16,7 @@ from timm.models import model_parameters
 from py.train_utils import *
 from swin.swinLayer import SwinTransformer
 
-from timm.loss import SoftTargetCrossEntropy
+from timm.loss import LabelSmoothingCrossEntropy
 from timm.scheduler import CosineLRScheduler
 from timm.data import create_loader, create_dataset
 
@@ -30,7 +30,7 @@ parser.add_argument("--epochs", type = int, default = 20, help = "Training lasts
 parser.add_argument("--batch_size", type = int, default = 100, help = "Batch size for range image packs.")
 parser.add_argument("--eval_time", type = int, default = 50, help = "Eval every <eval_time> batches.")
 parser.add_argument("--cooldown_epoch", type = int, default = 10, help = "Epochs to cool down lr after cyclic lr.")
-parser.add_argument("--eval_div", type = int, default = 5, help = "Output every <...> times in evaluation. Match ticks with training")
+parser.add_argument("--eval_div", type = int, default = 200, help = "Output every <...> times in evaluation. Match ticks with training")
 parser.add_argument("--name", type = str, default = "model_1.pth", help = "Model name for loading")
 parser.add_argument("--weight_decay", type = float, default = 3e-2, help = "Weight Decay in AdamW")
 parser.add_argument("--max_lr", type = float, default = 55e-5, help = "Max learning rate")
@@ -58,7 +58,7 @@ def main():
     test_set = create_dataset("Imagenette_val", "../dataset/imagenette2-320/", "val", is_training = False)
     train_loader = create_loader(train_set, 224, batch_size, True, 
         use_prefetcher = False, num_workers = 4, pin_memory = True, persistent_workers = True)
-    test_loader = create_loader(test_set, 224, 100, True, use_prefetcher = False, 
+    test_loader = create_loader(test_set, 224, 50, True, use_prefetcher = False, 
         num_workers = 8, pin_memory = True, persistent_workers = True)
 
     device = None
@@ -67,24 +67,24 @@ def main():
         exit(-1)
     device = torch.device(0)
     
-    model = SwinTransformer(7, 96, 224, (2, 2, 6, 2))
+    model = SwinTransformer(7, 96, 224, (2, 2, 6, 2)).cuda()
     if use_load == True and os.path.exists(load_path):
         model.loadFromFile(load_path)
     else:
         print("Not loading or load path '%s' does not exist."%(load_path))
 
     # ======= Loss function ==========
-    loss_func = SoftTargetCrossEntropy().cuda()
+    loss_func = LabelSmoothingCrossEntropy().cuda()
     eval_loss_func = torch.nn.CrossEntropyLoss().cuda()
 
     # ======= Optimizer and scheduler ========
     opt = optim.AdamW(model.parameters(), lr = 1.0, betas = (0.9, 0.999), weight_decay=args.weight_decay)
     min_max_ratio = args.min_lr / args.max_lr
     lec_sch_func = CosineLRScheduler(opt, t_initial = epochs // 2, t_mul = 1, lr_min = min_max_ratio, decay_rate = 0.1,
-            warmup_lr_init = min_max_ratio, warmup_t = 10, cycle_limit = 2, t_in_epochs = True)
+            warmup_lr_init = min_max_ratio, warmup_t = 5, cycle_limit = 2, t_in_epochs = True)
     opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda = partial(get_sch_lr, lec_sch_func, args.max_lr), last_epoch=-1)
 
-    epochs = 0  # lec_sch_func.get_cycle_length() + args.cooldown_epoch
+    epochs = lec_sch_func.get_cycle_length() + args.cooldown_epoch
     
     # ====== tensorboard summary writer ======
     writer = getSummaryWriter(epochs, del_dir)
@@ -106,7 +106,6 @@ def main():
             with amp.autocast():
                 pred = model(px)
                 loss:torch.Tensor = loss_func(pred, py)
-
             train_acc_cnt += accCounter(pred, py)
             train_num += len(pred)
 
@@ -134,7 +133,7 @@ def main():
             test_acc_cnt = 0
             test_loss:torch.Tensor = torch.zeros(1, device = device)
             eval_out_cnt = 0
-            for j, (ptx, pty) in enumerate(test_set):
+            for j, (ptx, pty) in enumerate(test_loader):
                 ptx:torch.Tensor = ptx.cuda()
                 pty:torch.Tensor = pty.cuda()
 
@@ -164,7 +163,7 @@ def main():
     torch.save({
         'model': model.state_dict(),
         'optimizer': opt.state_dict()},
-        "%smodel_4.pth"%(default_model_path)
+        "%smodel_1.pth"%(default_model_path)
     )
     writer.close()
     print("Output completed.")
