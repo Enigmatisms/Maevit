@@ -10,6 +10,7 @@ from torch import nn
 import matplotlib.pyplot as plt
 from torch.cuda import device
 from torch.nn import functional as F
+from timm.models.layers import trunc_normal_
 
 # The answer seems to be a 'No', for I think PE tends to learn the information after shifting
 class WinMSA(nn.Module):
@@ -25,14 +26,15 @@ class WinMSA(nn.Module):
         self.head_num = head_num
 
         # positional embeddings
-        self.positional_bias = nn.Parameter(torch.zeros(head_num, 2 * self.att_size - 1, 2 * self.att_size - 1), requires_grad = True)
+        self.positional_bias = nn.Parameter(torch.zeros((2 * win_size - 1) * (2 * win_size - 1), head_num))
         # using register buffer, this tensor will be moved to cuda device if .cuda() is called, also it is stored in state_dict
         self.register_buffer('relp_indices', WinMSA.getIndex(self.win_size))            
 
-        self.qkv_attn = nn.Linear(emb_dim, emb_dim * 3, bias = False)
+        self.qkv_attn = nn.Linear(emb_dim, emb_dim * 3, bias = True)
         self.proj_o = nn.Linear(emb_dim, emb_dim)
         self.proj_drop = nn.Dropout(0.1)
         self.attn_drop = nn.Dropout(0.1)
+        trunc_normal_(self.positional_bias, std=.02)
 
     @staticmethod
     def getIndex(win_size:int) -> torch.LongTensor:
@@ -52,9 +54,14 @@ class WinMSA(nn.Module):
         # q @ k.T : shape (batch_size, win_num, head_num, seq, seq), att_mask added according to different window position  
         attn = q @ k.transpose(-1, -2) * self.normalize_coeff
         # print(self.relp_indices.shape, self.positional_bias.shape, seq_len, self.win_size, X.shape, attn.shape)
-        attn = attn + self.positional_bias.view(self.head_num, -1)[:, self.relp_indices.view(-1)].view(self.head_num, seq_len, seq_len)
+
+        position_bias = self.positional_bias[self.relp_indices.view(-1)].view(seq_len, seq_len, -1)
+        position_bias = position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        attn = attn + position_bias.unsqueeze(0).unsqueeze(0)
+
+        # attn = attn + self.positional_bias.view(self.head_num, -1)[:, self.relp_indices.view(-1)].view(self.head_num, seq_len, seq_len)
         if not mask is None:
-            attn = attn + mask[None, :, None, :, :]
+            attn = attn + mask.unsqueeze(1).unsqueeze(0)
         proba:torch.Tensor = F.softmax(attn, dim = -1)
         proba = self.attn_drop(proba)
         # proba: batch_size, window, head_num, seq_len, seq_len -> output (batch_size, win_num, head_num, seq_len, emb_dim/ head_num)
@@ -66,7 +73,7 @@ class WinMSA(nn.Module):
 
 # default invariant shift: win_size / 2
 class SwinMSA(WinMSA):
-    def __init__(self, img_size, win_size = 7, emb_dim = 96, head_num = 4, device = 'cpu') -> None:
+    def __init__(self, img_size, win_size = 7, emb_dim = 96, head_num = 4) -> None:
         super().__init__(win_size, emb_dim, head_num)
         self.win_h = img_size // win_size
         self.win_w = img_size // win_size
@@ -107,7 +114,8 @@ class SwinMSA(WinMSA):
         return mask.view(-1, self.att_size, self.att_size)
 
 if __name__ == "__main__":
-    sw = SwinMSA(14, 7, 1, 1, device = 'cuda:0').cuda()
+    sw = SwinMSA(14, 7, 1, 1).cuda()
+    # print(sw.relp_indices.shape)
     mask = sw.getAttentionMask()
     for i in range(mask.shape[0]):
         plt.figure(i)

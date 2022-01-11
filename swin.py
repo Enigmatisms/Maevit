@@ -57,7 +57,7 @@ def main():
     train_set = create_dataset("Imagenette_train", "../dataset/imagenette2-320/", "train", is_training = True)
     test_set = create_dataset("Imagenette_val", "../dataset/imagenette2-320/", "val", is_training = False)
     train_loader = create_loader(train_set, 224, batch_size, True, 
-        use_prefetcher = False, num_workers = 4, pin_memory = True, persistent_workers = True)
+        use_prefetcher = False, num_workers = 8, pin_memory = True, persistent_workers = True)
     test_loader = create_loader(test_set, 224, 50, True, use_prefetcher = False, 
         num_workers = 8, pin_memory = True, persistent_workers = True)
 
@@ -67,7 +67,7 @@ def main():
         exit(-1)
     device = torch.device(0)
     
-    model = SwinTransformer(7, 96, 224, (2, 2, 6, 2)).cuda()
+    model = SwinTransformer(7, 96, 224, (2, 2, 4, 2)).cuda()
     if use_load == True and os.path.exists(load_path):
         model.loadFromFile(load_path)
     else:
@@ -131,8 +131,9 @@ def main():
         model.eval()
         with torch.no_grad():
             test_acc_cnt = 0
-            test_loss:torch.Tensor = torch.zeros(1, device = device)
             eval_out_cnt = 0
+            test_cnt = 0
+            test_loss:torch.Tensor = torch.zeros(1, device = device)
             for j, (ptx, pty) in enumerate(test_loader):
                 ptx:torch.Tensor = ptx.cuda()
                 pty:torch.Tensor = pty.cuda()
@@ -140,9 +141,10 @@ def main():
                 pred = model(ptx)
                 test_acc_cnt += accCounter(pred, pty)
                 test_loss += eval_loss_func(pred, pty)
-                if (j + 1) % 20 == 0:
-                    test_acc = test_acc_cnt / 2000
-                    test_loss /= 2000
+                test_cnt += len(pty)
+                if (j + 1) % 5 == 0:
+                    test_acc = test_acc_cnt / test_cnt
+                    test_loss /= test_cnt
 
                     writer.add_scalar('Loss/Test loss', test_loss, eval_div * ep + eval_out_cnt)
                     writer.add_scalar('Acc/Test Set Accuracy', test_acc, eval_div * ep + eval_out_cnt)
@@ -151,6 +153,7 @@ def main():
                     ))
                     eval_out_cnt += 1
                     test_acc_cnt = 0
+                    test_cnt = 0
                     test_loss.zero_()
         model.train()
 

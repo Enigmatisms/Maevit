@@ -78,12 +78,11 @@ class SwinTransformerLayer(nn.Module):
 """
     To my suprise, patching embedding generation in official implementation contains Conv2d... I thought this was conv-free
     Patch partition and embedding generation in one shot, in the paper, it is said that:
-    'A linear embedding layer is applied on this raw-valued feature to project it to an arbitrary dimension (denoted as emb_dim)'
+    'A linear embedding layer is applied on this raw-valued feature to project it to an arbitrary dimension'
 """
 class PatchEmbeddings(nn.Module):
     def __init__(self, patch_size = 4, win_size = 7, out_channels = 48, input_channel = 3, norm_layer = None) -> None:
         super().__init__()
-        self.emb_dim = 256
         self.win_size = win_size
         self.conv = nn.Conv2d(input_channel, out_channels, kernel_size = patch_size, stride = patch_size)
         if not norm_layer is None:
@@ -125,7 +124,7 @@ class SwinTransformer(nn.Module):
         self.emb_drop = nn.Dropout(emb_dropout)
         # input image_size / 4, output_imgae_size / 4
         self.swin_layers = nn.ModuleList([])
-        num_layers = (2, 2, 6, 2)
+        num_layers = (2, 2, 4, 2)
         for i in range(4):
             num_layer = num_layers[i]
             num_head = head_num[i]
