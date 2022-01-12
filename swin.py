@@ -156,12 +156,12 @@ def main():
                     test_cnt = 0
                     test_loss.zero_()
         model.train()
-
-        torch.save({
-            'model': model.state_dict(),
-            'optimizer': opt.state_dict()},
-            "%schkpt_%d.pt"%(default_chkpt_path, train_cnt)
-        )
+        opt_sch.step()
+        # torch.save({
+        #     'model': model.state_dict(),
+        #     'optimizer': opt.state_dict()},
+        #     "%schkpt_%d.pt"%(default_chkpt_path, train_cnt)
+        # )
         opt_sch.step()
     torch.save({
         'model': model.state_dict(),
