@@ -78,13 +78,12 @@ def main():
     eval_loss_func = torch.nn.CrossEntropyLoss().cuda()
 
     # ======= Optimizer and scheduler ========
-    opt = optim.AdamW(model.parameters(), lr = 1.0, betas = (0.9, 0.999), weight_decay=args.weight_decay)
-    min_max_ratio = args.min_lr / args.max_lr
-    lec_sch_func = CosineLRScheduler(opt, t_initial = epochs // 2, t_mul = 1, lr_min = min_max_ratio, decay_rate = 0.1,
-            warmup_lr_init = min_max_ratio, warmup_t = 5, cycle_limit = 2, t_in_epochs = True)
-    opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda = partial(get_sch_lr, lec_sch_func, args.max_lr), last_epoch=-1)
-
-    epochs = lec_sch_func.get_cycle_length() + args.cooldown_epoch
+    opt = optim.AdamW(model.parameters(), lr = 5e-6, betas = (0.9, 0.999), weight_decay=args.weight_decay)
+    # min_max_ratio = args.min_lr / args.max_lr
+    # lec_sch_func = CosineLRScheduler(opt, t_initial = epochs // 2, t_mul = 1, lr_min = min_max_ratio, decay_rate = 0.1,
+    #         warmup_lr_init = min_max_ratio, warmup_t = 5, cycle_limit = 2, t_in_epochs = True)
+    # opt_sch = optim.lr_scheduler.LambdaLR(opt, lr_lambda = partial(get_sch_lr, lec_sch_func, args.max_lr), last_epoch=-1)
+    # epochs = lec_sch_func.get_cycle_length() + args.cooldown_epoch
     
     # ====== tensorboard summary writer ======
     writer = getSummaryWriter(epochs, del_dir)
@@ -98,7 +97,7 @@ def main():
         model.train()
         train_acc_cnt = 0
         train_num = 0
-        writer.add_scalar('Learning Rate', opt_sch.get_last_lr()[-1], ep)
+        # writer.add_scalar('Learning Rate', opt_sch.get_last_lr()[-1], ep)
         
         for i, (px, py) in enumerate(train_loader):
             px:torch.Tensor = px.cuda()
@@ -119,8 +118,8 @@ def main():
 
             if train_cnt % eval_time == 1:
                 train_acc = train_acc_cnt / train_num
-                print("Traning Epoch: %4d / %4d\t Batch %4d / %4d\t train loss: %.4f\t acc: %.4f\t lr: %f"%(
-                        ep, epochs, i, batch_num, loss.item(), train_acc, opt_sch.get_last_lr()[-1]
+                print("Traning Epoch: %4d / %4d\t Batch %4d / %4d\t train loss: %.4f\t acc: %.4f\t"%(
+                        ep, epochs, i, batch_num, loss.item(), train_acc
                 ))
                 writer.add_scalar('Loss/Train Loss', loss, train_cnt)
                 writer.add_scalar('Acc/Train Set Accuracy', train_acc, train_cnt)
@@ -148,25 +147,23 @@ def main():
 
                     writer.add_scalar('Loss/Test loss', test_loss, eval_div * ep + eval_out_cnt)
                     writer.add_scalar('Acc/Test Set Accuracy', test_acc, eval_div * ep + eval_out_cnt)
-                    print("Evalutaion in epoch: %4d / %4d\t evalutaion step: %d\t test loss: %.4f\t test acc: %.4f\t lr: %f"%(
-                        ep, epochs, eval_out_cnt, test_loss.item(), test_acc, opt_sch.get_last_lr()[-1]
+                    print("Evalutaion in epoch: %4d / %4d\t evalutaion step: %d\t test loss: %.4f\t test acc: %.4f\t"%(
+                        ep, epochs, eval_out_cnt, test_loss.item(), test_acc, 
                     ))
                     eval_out_cnt += 1
                     test_acc_cnt = 0
                     test_cnt = 0
                     test_loss.zero_()
         model.train()
-        opt_sch.step()
         # torch.save({
         #     'model': model.state_dict(),
         #     'optimizer': opt.state_dict()},
         #     "%schkpt_%d.pt"%(default_chkpt_path, train_cnt)
         # )
-        opt_sch.step()
     torch.save({
         'model': model.state_dict(),
         'optimizer': opt.state_dict()},
-        "%smodel_1.pth"%(default_model_path)
+        "%smodel_2.pth"%(default_model_path)
     )
     writer.close()
     print("Output completed.")
